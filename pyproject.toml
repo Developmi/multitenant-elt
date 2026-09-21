@@ -1,12 +1,12 @@
 [project]
-name = "agency-analytics-kit"
-version = "1.0.0"
-description = "Multi-tenant marketing data pipeline: extract, transform, and visualize ads + organic social metrics"
+name = "multitenant-elt"
+version = "1.1.0"
+description = "Multi-tenant ELT pipeline with dlt and dbt Core: 10 platform connectors, per-tenant schema isolation on PostgreSQL 16, Pydantic contracts, and Metabase dashboards."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [
-    { name = "Agency Analytics Kit Contributors" },
+    { name = "multitenant-elt Contributors" },
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -25,11 +25,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Developmi/agency-analytics-kit"
-Documentation = "https://github.com/Developmi/agency-analytics-kit#readme"
-Repository = "https://github.com/Developmi/agency-analytics-kit"
-Issues = "https://github.com/Developmi/agency-analytics-kit/issues"
-Changelog = "https://github.com/Developmi/agency-analytics-kit/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/Developmi/multitenant-elt"
+Documentation = "https://github.com/Developmi/multitenant-elt#readme"
+Repository = "https://github.com/Developmi/multitenant-elt"
+Issues = "https://github.com/Developmi/multitenant-elt/issues"
+Changelog = "https://github.com/Developmi/multitenant-elt/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling"]

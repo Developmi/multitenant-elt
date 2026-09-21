@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="docs/assets/agency-analytics.webp" width="180" alt="Developmi Agency Analytics Kit" />
+<img src="docs/assets/agency-analytics.webp" width="180" alt="Developmi multitenant-elt" />
 
-# Agency Analytics Kit | Developmi
+# Multitenant ELT | Developmi
 
 *Eliminate manual reporting across 10 marketing platforms - one pipeline, one dashboard, zero spreadsheets.*
 
@@ -19,7 +19,7 @@
 
 ```mermaid
 mindmap
-  ((Agency Analytics Kit))
+  ((multitenant-elt))
     Ads
       Meta Ads
       TikTok Ads
@@ -124,8 +124,8 @@ unchanged: the probe is a manual diagnostics entry point, not a pipeline step.
 ### 1. Clone and configure
 
 ```bash
-git clone https://github.com/Developmi/agency-analytics-kit.git
-cd agency-analytics-kit
+git clone https://github.com/Developmi/multitenant-elt.git
+cd multitenant-elt
 cp .env.example .env
 # Edit .env with your API tokens, database passwords, and Telegram credentials
 ```
@@ -234,13 +234,13 @@ the pipeline container — its guard is a dedicated read-only DB role
 ### Use a published image (`vX` tags)
 
 Once a `vX` tag exists on GitHub, the `docker-build-scan-sign` workflow publishes a
-multi-arch image to `ghcr.io/developmi/agency-analytics-kit`. Consumers can then
+multi-arch image to `ghcr.io/developmi/multitenant-elt`. Consumers can then
 pull and run it without building locally:
 
 ```bash
-docker pull ghcr.io/developmi/agency-analytics-kit:vX
+docker pull ghcr.io/developmi/multitenant-elt:vX
 docker run --rm -d --name agency_pipeline --env-file .env \
-  -v "$PWD/clients:/app/clients" ghcr.io/developmi/agency-analytics-kit:vX
+  -v "$PWD/clients:/app/clients" ghcr.io/developmi/multitenant-elt:vX
 ```
 
 Honest notes on the published artifact:
