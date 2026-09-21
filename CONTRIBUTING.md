@@ -1,4 +1,4 @@
-# Contributing to Agency Analytics Kit
+# Contributing to multitenant-elt
 
 Thank you for your interest in contributing. This project follows the Developmi engineering standard.
 
@@ -6,8 +6,8 @@ Thank you for your interest in contributing. This project follows the Developmi 
 
 ```bash
 # Clone and install
-git clone https://github.com/Developmi/agency-analytics-kit.git
-cd agency-analytics-kit
+git clone https://github.com/Developmi/multitenant-elt.git
+cd multitenant-elt
 uv sync
 ```
 
@@ -38,7 +38,7 @@ chore/bump-dependencies
 
 ### 1. Report a Bug
 
-Open a [GitHub Issue](https://github.com/Developmi/agency-analytics-kit/issues/new?template=bug_report.md)
+Open a [GitHub Issue](https://github.com/Developmi/multitenant-elt/issues/new?template=bug_report.md)
 with:
 - A clear title and description
 - Steps to reproduce
@@ -47,7 +47,7 @@ with:
 
 ### 2. Suggest a Feature
 
-Open a [Feature Request](https://github.com/Developmi/agency-analytics-kit/issues/new?template=feature_request.md)
+Open a [Feature Request](https://github.com/Developmi/multitenant-elt/issues/new?template=feature_request.md)
 with:
 - What problem it solves
 - How it fits into the existing architecture

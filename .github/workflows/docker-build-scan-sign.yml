@@ -61,20 +61,20 @@ jobs:
           platforms: linux/amd64
           push: false
           load: true
-          tags: ghcr.io/developmi/agency-analytics-kit:${{ github.sha }}-scan
+          tags: ghcr.io/developmi/multitenant-elt:${{ github.sha }}-scan
           cache-from: type=gha
 
       - name: Scan amd64 image (SARIF)
         run: |
           trivy image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
             --skip-version-check --format sarif --output trivy-results.sarif \
-            ghcr.io/developmi/agency-analytics-kit:${{ github.sha }}-scan
+            ghcr.io/developmi/multitenant-elt:${{ github.sha }}-scan
 
       - name: Scan amd64 image (CRITICAL/HIGH gate)
         run: |
           trivy image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
             --skip-version-check --exit-code 1 \
-            ghcr.io/developmi/agency-analytics-kit:${{ github.sha }}-scan
+            ghcr.io/developmi/multitenant-elt:${{ github.sha }}-scan
 
       - name: Build arm64 image (load)
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
@@ -84,20 +84,20 @@ jobs:
           platforms: linux/arm64
           push: false
           load: true
-          tags: ghcr.io/developmi/agency-analytics-kit:${{ github.sha }}-scan-arm64
+          tags: ghcr.io/developmi/multitenant-elt:${{ github.sha }}-scan-arm64
           cache-from: type=gha
 
       - name: Scan arm64 image (SARIF)
         run: |
           trivy image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
             --skip-version-check --format sarif --output trivy-results-arm64.sarif \
-            ghcr.io/developmi/agency-analytics-kit:${{ github.sha }}-scan-arm64
+            ghcr.io/developmi/multitenant-elt:${{ github.sha }}-scan-arm64
 
       - name: Scan arm64 image (CRITICAL/HIGH gate)
         run: |
           trivy image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
             --skip-version-check --exit-code 1 \
-            ghcr.io/developmi/agency-analytics-kit:${{ github.sha }}-scan-arm64
+            ghcr.io/developmi/multitenant-elt:${{ github.sha }}-scan-arm64
 
       # R-CI-3.11: no secrets or client configs baked in — .env and clients/
       # exist only as runtime bind-mounts, never inside the image.
@@ -105,8 +105,8 @@ jobs:
         run: |
           set -euo pipefail
           for img in \
-            "ghcr.io/developmi/agency-analytics-kit:${{ github.sha }}-scan" \
-            "ghcr.io/developmi/agency-analytics-kit:${{ github.sha }}-scan-arm64"; do
+            "ghcr.io/developmi/multitenant-elt:${{ github.sha }}-scan" \
+            "ghcr.io/developmi/multitenant-elt:${{ github.sha }}-scan-arm64"; do
             docker run --rm --entrypoint sh "$img" -c \
               'test ! -e /app/.env && test ! -e /app/clients'
           done
@@ -173,7 +173,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/developmi/agency-analytics-kit:${{ github.ref_name }}
+          tags: ghcr.io/developmi/multitenant-elt:${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
@@ -187,7 +187,7 @@ jobs:
       - name: Generate CycloneDX SBOM
         uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0.24.2
         with:
-          image: ghcr.io/developmi/agency-analytics-kit:${{ github.ref_name }}
+          image: ghcr.io/developmi/multitenant-elt:${{ github.ref_name }}
           registry-username: ${{ github.actor }}
           registry-password: ${{ secrets.GITHUB_TOKEN }}
           format: cyclonedx-json
@@ -202,19 +202,19 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           cosign sign --yes \
-            "ghcr.io/developmi/agency-analytics-kit@${DIGEST}"
+            "ghcr.io/developmi/multitenant-elt@${DIGEST}"
 
       - name: Attest SBOM (cosign keyless)
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           cosign attest --type cyclonedx --predicate sbom.cdx.json --yes \
-            "ghcr.io/developmi/agency-analytics-kit@${DIGEST}"
+            "ghcr.io/developmi/multitenant-elt@${DIGEST}"
 
       - name: Generate SLSA provenance attestation
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
-          subject-name: ghcr.io/developmi/agency-analytics-kit
+          subject-name: ghcr.io/developmi/multitenant-elt
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
@@ -230,7 +230,7 @@ jobs:
         run: |
           set -euo pipefail
           org="developmi"
-          pkg="agency-analytics-kit"
+          pkg="multitenant-elt"
           versions="$(gh api "orgs/${org}/packages/container/${pkg}/versions?per_page=100")"
           version_id="$(printf '%s' "${versions}" | jq -r --arg tag "${TAG}" \
             '.[] | select(any(.metadata.container.tags[]; . == $tag)) | .id' | head -n 1)"

@@ -12,7 +12,7 @@
 **Do not open a public GitHub issue for security vulnerabilities.**
 
 Report vulnerabilities privately via one of these channels:
-- **GitHub Security Advisories:** [Report a vulnerability](https://github.com/Developmi/agency-analytics-kit/security/advisories/new)
+- **GitHub Security Advisories:** [Report a vulnerability](https://github.com/Developmi/multitenant-elt/security/advisories/new)
 - **Email:** miguel@developmi.com - encrypt with PGP if the finding is critical.
 
 Include in your report:

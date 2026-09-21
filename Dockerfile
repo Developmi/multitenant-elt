@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Agency Analytics Kit — multi-stage image (publishable)
+# Agency Analytics Kit (multitenant-elt) — multi-stage image (publishable)
 # Builder installs deps via uv; runtime ships venv + src only (non-root).
 # The runtime image is self-sufficient: /app/src carries agency_analytics,
 # connectors (run_*.py) and dbt_project. Dev compose bind-mounts ../../src
@@ -12,7 +12,7 @@
 # OCI build metadata. Defaults keep a plain `docker build` working; CI (see
 # .github/workflows/docker-build-scan-sign.yml) overrides them from the
 # GitHub context via --build-arg.
-ARG SOURCE=https://github.com/Developmi/agency-analytics-kit
+ARG SOURCE=https://github.com/Developmi/multitenant-elt
 ARG REVISION=""
 ARG CREATED=""
 
@@ -69,8 +69,8 @@ ENV \
 LABEL org.opencontainers.image.source="$SOURCE" \
       org.opencontainers.image.revision="$REVISION" \
       org.opencontainers.image.created="$CREATED" \
-      org.opencontainers.image.title="Agency Analytics Kit" \
-      org.opencontainers.image.description="Multi-tenant marketing data pipeline: extract, transform, and visualize ads + organic social metrics" \
+      org.opencontainers.image.title="multitenant-elt" \
+      org.opencontainers.image.description="Multi-tenant ELT pipeline with dlt and dbt Core: 10 platform connectors, per-tenant schema isolation on PostgreSQL 16, Pydantic contracts, and Metabase dashboards." \
       org.opencontainers.image.vendor="Developmi"
 
 # Numeric UID (DL3066): non-numeric USER may not resolve in all runtimes; the
