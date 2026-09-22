@@ -193,6 +193,7 @@ jobs:
           format: cyclonedx-json
           output-file: sbom.cdx.json
           artifact-name: sbom-cyclonedx
+          upload-release-assets: false
 
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
@@ -239,4 +240,5 @@ jobs:
             exit 0
           fi
           echo "::warning::Deleting GHCR version ${version_id} (tag ${TAG}) after post-push failure."
-          gh api -X DELETE "orgs/${org}/packages/container/${pkg}/versions/${version_id}" -f confirm=true
+          gh api -X DELETE "orgs/${org}/packages/container/${pkg}/versions/${version_id}" \
+            -H "Accept: application/vnd.github+json"
