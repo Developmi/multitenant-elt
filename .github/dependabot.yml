@@ -8,6 +8,7 @@
 # current. `cooldown: default-days: 7` is supported for pip, docker and
 # github-actions (GitHub docs, cooldown option table) and, together with the
 # weekly interval, implements the intended 7-day cadence.
+---
 version: 2
 updates:
   # Python deps: pyproject.toml + tracked uv.lock (reproducible `uv sync --frozen`).

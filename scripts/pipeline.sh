@@ -47,7 +47,8 @@ check_container() {
   if [ "$status" != "healthy" ]; then
     send_telegram "⚠️ <b>Pipeline Abortado</b>
 Container <code>$name</code> no está healthy.
-Status: <code>${status:-no encontrado}</code>"
+Status: <code>${status:-no encontrado}</code>
+Runbook: <code>docs/runbooks/container-unhealthy.md</code>"
     log "ERROR: Container $name unhealthy (status: ${status:-no encontrado}). Abortando."
     exit 1
   fi
@@ -144,7 +145,8 @@ check_exit_code() {
   if [ "$code" -ne 0 ]; then
     send_telegram "❌ <b>Error en Pipeline</b>
 Paso: <code>$step</code>
-Cliente: <code>$client</code>"
+Cliente: <code>$client</code>
+Runbook: <code>docs/runbooks/pipeline-failure.md</code>"
     log "ERROR: Falló $step para $client (exit code $code)"
     return 1
   fi
@@ -343,7 +345,8 @@ Conector: <code>${conn_name}</code>"
     dbt_status="failed"
     pipeline_finish_step "$step_id" "failed" "dbt build falló"
     send_telegram "⚠️ <b>Fallo dbt</b>
-Cliente: <code>${client_id}</code>"
+Cliente: <code>${client_id}</code>
+Runbook: <code>docs/runbooks/pipeline-failure.md</code>"
     log "ERROR: dbt falló para ${client_id}."
   fi
 

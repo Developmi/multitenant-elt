@@ -17,9 +17,7 @@ def _get_access_token(client_email: str, private_key: str) -> str:
         from google.auth.transport.requests import Request
         from google.oauth2.service_account import Credentials
     except ImportError:
-        raise ImportError(
-            "google-auth is required for GA4. Install it with: pip install google-auth"
-        )
+        raise ImportError("google-auth is required for GA4. Install it with: uv add google-auth")
 
     scopes = ["https://www.googleapis.com/auth/analytics.readonly"]
     creds = Credentials.from_service_account_info(
