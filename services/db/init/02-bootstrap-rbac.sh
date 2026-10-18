@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Agency Analytics Kit — Bootstrap RBAC idempotente v2 (spec D, design D4/D5)
+# multitenant-elt — Bootstrap RBAC idempotente v2 (spec D, design D4/D5)
 # ---------------------------------------------------------------------------
 # v2 (multi-tenancy-real): los schemas por tenant YA NO se pre-crean aquí.
 # `raw_<connector>_<client_id>` los crea dlt y `client_<client_id>` los crea

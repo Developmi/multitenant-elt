@@ -1,17 +1,32 @@
+---
 services:
   pipeline:
     build:
       context: ../..
       dockerfile: Dockerfile
     container_name: agency_pipeline
+    restart: "on-failure:5"
+    user: "1000:1000"
     env_file:
+      - path: ../../.env
+        required: false
       - path: .env
         required: false
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+          pids: 256
     environment:
       CLIENTS_DIR: /app/clients
       DESTINATION__POSTGRES__CREDENTIALS__HOST: postgres
     volumes:
-      - ../../clients:/app/clients
+      - ../../clients:/app/clients:ro
       - ../../src:/app/src
     healthcheck:
       # Healthcheck real (spec B3, design D3): verifica venv + import del

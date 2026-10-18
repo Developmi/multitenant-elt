@@ -1,3 +1,4 @@
+---
 services:
   metabase:
     # Multi-tenancy-real (spec F-R1, design D9): Metabase is OPT-IN via compose
@@ -8,11 +9,30 @@ services:
     image: metabase/metabase:v0.57.13@sha256:de1ba782c47ab45a471cb5ced9de566e77582150c14f48f7edd6db3473325d39
     profiles: ["metabase"]
     container_name: agency_metabase
+    restart: unless-stopped
     env_file:
+      - path: ../../.env
+        required: false
       - path: .env
         required: false
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+          pids: 256
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     depends_on:
       postgres:
         condition: service_healthy

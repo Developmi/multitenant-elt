@@ -24,9 +24,12 @@ env/
 .DS_Store
 Thumbs.db
 
-# Environment (keep .env.example, ignore .env)
+# Environment (keep .env.example, ignore .env and backups)
 .env
+.env.*
+.env.backup*
 !.env.example
+
 
 # Client configs — real client YAMLs are local-only and must never be staged;
 # the repo tracks only the sample clients (_template/acme/nike).
@@ -88,3 +91,6 @@ sbom.*.json
 # macOS
 ._.Trashes
 .Trashes
+
+# Development tools binaries
+tools/bin/
