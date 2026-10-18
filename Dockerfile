@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Agency Analytics Kit (multitenant-elt) — multi-stage image (publishable)
+# multitenant-elt — multi-stage image (publishable)
 # Builder installs deps via uv; runtime ships venv + src only (non-root).
 # The runtime image is self-sufficient: /app/src carries agency_analytics,
 # connectors (run_*.py) and dbt_project. Dev compose bind-mounts ../../src
@@ -33,7 +33,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
 # Layer 2: copy project metadata and source code
-COPY README.md /app/
+COPY README.md main.py /app/
 COPY src/ /app/src/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
@@ -58,6 +58,8 @@ WORKDIR /app
 # Copy virtual env and source from builder
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --from=builder --chown=app:app /app/src /app/src
+COPY --from=builder --chown=app:app /app/main.py /app/main.py
+COPY --chmod=755 scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 ENV \
     PATH="/app/.venv/bin:${PATH}" \
@@ -77,4 +79,5 @@ LABEL org.opencontainers.image.source="$SOURCE" \
 # app user is created with --uid 1000 above, so 1000 is the exact same identity.
 USER 1000
 
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["tail", "-f", "/dev/null"]

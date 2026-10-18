@@ -1,4 +1,4 @@
--- Agency Analytics Kit - Pipeline observability tables
+-- multitenant-elt - Pipeline observability tables
 -- Auto-executed by Postgres on first container start (docker-entrypoint-initdb.d)
 
 CREATE SCHEMA IF NOT EXISTS public;

@@ -12,6 +12,8 @@ on:
     paths:
       - "Dockerfile"
       - ".dockerignore"
+      - "scripts/docker-entrypoint.sh"
+      - "main.py"
       - "pyproject.toml"
       - "uv.lock"
       - "src/**"
@@ -22,6 +24,9 @@ on:
 concurrency:
   group: dbss-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   # ── Build + scan: runs on every PR and every v* tag push. ──────────────

@@ -73,8 +73,8 @@ def cmd_dlt(args):
 
 def cli():
     parser = argparse.ArgumentParser(
-        prog="agency-analytics",
-        description="Agency Analytics Kit CLI",
+        prog="multitenant-elt",
+        description="Multitenant ELT CLI",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

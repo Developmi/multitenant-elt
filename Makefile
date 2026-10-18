@@ -1,12 +1,17 @@
-# Agency Analytics Kit - Makefile
+# multitenant-elt - Makefile
 # uv for deps, Docker Compose for infra
+include tools/versions.mk
 
 SHELL := /bin/bash
 .ONESHELL:
 .SHELLFLAGS := -eu -o pipefail -c
 .DEFAULT_GOAL := help
 
+TOOLS := tools/bin
+
 .PHONY: help install lock lint format check typecheck test quality
+.PHONY: lint-docker lint-actions lint-all test-security
+.PHONY: tools reinstall doctor
 .PHONY: clean pristine
 .PHONY: setup-networks setup-env pipeline
 .PHONY: docker-build docker-build-pipeline
@@ -38,24 +43,82 @@ lock:           ## Lock deps after adding a package
 # === QUALITY GATE ==========================================================
 
 lint:           ## Lint with ruff
-	uv run ruff check src/ tests/
+	uv run ruff check src/ tests/ main.py
 
 format:         ## Format with ruff
-	uv run ruff format src/ tests/
+	uv run ruff format src/ tests/ main.py
 
 check:          ## Check format (read-only)
-	uv run ruff format --check src/ tests/
+	uv run ruff format --check src/ tests/ main.py
 
 typecheck:      ## Type-check with mypy
-	uv run mypy src/
+	uv run mypy src/ main.py
 
 test:           ## Run test suite
 	uv run pytest tests/ -v
 
-quality:        ## Full gate: lint -> typecheck -> test
+lint-docker:   ## Lint Dockerfile with hadolint
+	@test -x $(TOOLS)/hadolint || $(MAKE) tools
+	$(TOOLS)/hadolint --failure-threshold warning Dockerfile
+
+lint-actions:  ## Lint and audit GitHub Actions (actionlint + zizmor + yamllint)
+	@test -x $(TOOLS)/actionlint || $(MAKE) tools
+	$(TOOLS)/actionlint
+	uv run zizmor .github/workflows
+	uv run yamllint -c .yamllint.yaml .github/workflows .github/dependabot.yml services/
+
+lint-all:      ## Run all linters (python, docker, actions, yaml)
 	$(MAKE) lint
+	$(MAKE) check
 	$(MAKE) typecheck
+	$(MAKE) lint-docker
+	$(MAKE) lint-actions
+
+test-security: ## Run Trivy filesystem vulnerability scan
+	@test -x $(TOOLS)/trivy || $(MAKE) tools
+	$(TOOLS)/trivy fs --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed .
+
+quality:       ## Full gate: lint-all -> test -> test-security
+	$(MAKE) lint-all
 	$(MAKE) test
+
+# === DEV TOOLS =============================================================
+
+tools:          ## Install pinned development tools (actionlint, hadolint, trivy)
+	@ACTIONLINT_VERSION=$(ACTIONLINT_VERSION) \
+	ACTIONLINT_SHA256_LINUX_AMD64=$(ACTIONLINT_SHA256_LINUX_AMD64) \
+	ACTIONLINT_SHA256_LINUX_ARM64=$(ACTIONLINT_SHA256_LINUX_ARM64) \
+	ACTIONLINT_SHA256_DARWIN_AMD64=$(ACTIONLINT_SHA256_DARWIN_AMD64) \
+	ACTIONLINT_SHA256_DARWIN_ARM64=$(ACTIONLINT_SHA256_DARWIN_ARM64) \
+	HADOLINT_VERSION=$(HADOLINT_VERSION) \
+	HADOLINT_SHA256_LINUX_AMD64=$(HADOLINT_SHA256_LINUX_AMD64) \
+	HADOLINT_SHA256_LINUX_ARM64=$(HADOLINT_SHA256_LINUX_ARM64) \
+	HADOLINT_SHA256_DARWIN_AMD64=$(HADOLINT_SHA256_DARWIN_AMD64) \
+	HADOLINT_SHA256_DARWIN_ARM64=$(HADOLINT_SHA256_DARWIN_ARM64) \
+	TRIVY_VERSION=$(TRIVY_VERSION) \
+	TRIVY_SHA256_LINUX_AMD64=$(TRIVY_SHA256_LINUX_AMD64) \
+	TRIVY_SHA256_LINUX_ARM64=$(TRIVY_SHA256_LINUX_ARM64) \
+	TRIVY_SHA256_DARWIN_AMD64=$(TRIVY_SHA256_DARWIN_AMD64) \
+	TRIVY_SHA256_DARWIN_ARM64=$(TRIVY_SHA256_DARWIN_ARM64) \
+	./tools/install.sh
+
+reinstall:      ## Force reinstall development tools
+	@REINSTALL=1 $(MAKE) tools
+
+doctor:         ## Check development environment and tool versions
+	@test -x $(TOOLS)/actionlint || $(MAKE) tools
+	@printf "\n"
+	@printf "\033[1mDevelopment Environment\033[0m\n"
+	@printf "=======================\n\n"
+	@printf "%-18s %s\n" "Python" "$$(uv run python --version | awk '{print $$2}')"
+	@printf "%-18s %s\n" "uv" "$$(uv --version | awk '{print $$2}')"
+	@printf "%-18s %s\n" "Docker" "$$(docker version --format '{{.Client.Version}}' 2>/dev/null || echo 'not running')"
+	@printf "%-18s %s\n" "actionlint" "$$($(TOOLS)/actionlint -version 2>/dev/null | head -1)"
+	@printf "%-18s %s\n" "hadolint" "$$($(TOOLS)/hadolint --version 2>/dev/null | awk '{print $$NF}')"
+	@printf "%-18s %s\n" "trivy" "$$($(TOOLS)/trivy --version 2>/dev/null | head -1 | awk '{print $$2}' || echo 'not installed')"
+	@printf "%-18s %s\n" "yamllint" "$$(uv run yamllint --version | awk '{print $$2}')"
+	@printf "%-18s %s\n" "zizmor" "$$(uv run zizmor --version | awk '{print $$2}')"
+	@printf "\n"
 
 # === CLEANUP ===============================================================
 
