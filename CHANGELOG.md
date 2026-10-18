@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.2.0] - 2026-10-17
+
+### Added
+
+- **Production Autonomy & CLI**: Added `multitenant-elt` binary script entrypoint, standalone in-container entrypoint (`scripts/docker-entrypoint.sh`), and dedicated operational orchestrator (`scripts/prod.sh`) without `make` dependency.
+- **Cryptographic Developer Tooling**: Implemented `tools/install.sh` and `tools/versions.mk` for SHA256-verified offline binaries (`actionlint`, `hadolint`, `trivy`), with `make tools`, `make doctor`, and local vulnerability gate `make test-security`.
+- **Quality & Security Gates**: Added `yamllint` and `zizmor` to `dependency-groups.dev` and unified `make quality` (`lint-all` + `test`).
+- **SRE & Production Documentation**: Authored operational runbooks (`pipeline-failure.md`, `container-unhealthy.md`), `DEVELOPMENT.md`, and `docs/production-deployment.md`.
+- **Configuration SSOT**: Centralized environment plane in root `.env` with relative pathing across Compose services and eliminated fragmented `.env` sprawl.
+
+### Security
+
+- Dependency upgrades: Updated `urllib3` to `2.8.0` in `uv.lock` resolving CVE-2026-97687 and CVE-2026-97689.
+- Replaced non-pinned `pip install` in `run_ga4.py` with `uv add`.
+- Hardened `.gitignore` to prevent credential leakage (`.env.*`, `.env.backup*`, `tools/bin/`).
+
+## [1.1.2] - 2026-09-22
+
+### Fixed
+
+- CI: Disable SBOM release asset upload and harden rollback version deletion syntax in `docker-build-scan-sign.yml`.
+- Pinned and verified CodeQL upload-sarif action comment references.
+
+## [1.1.1] - 2026-09-19
+
+### Security
+
+- Docker: Pinned `python:3.12-slim` base digest in `Dockerfile` to eliminate upstream Debian CVEs.
+
+## [1.1.0] - 2026-09-07
+
+### Added
+
+- Organic daily marts for Instagram and TikTok profiles, including history tables for insights and follower counts.
+- History table archiver for raw-tenant schemas with nullable column hints.
+- Pipeline script support for organic marts and dynamic dbt execution planning.
+
 ## [1.0.0] - 2026-07-22
 
 ### Added

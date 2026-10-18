@@ -1,4 +1,4 @@
-# Architecture - Agency Analytics Kit
+# Architecture - multitenant-elt
 
 ---
 
