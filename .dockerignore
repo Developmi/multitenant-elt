@@ -21,4 +21,6 @@
 !pyproject.toml
 !uv.lock
 !README.md
+!main.py
+!scripts/docker-entrypoint.sh
 !src/
