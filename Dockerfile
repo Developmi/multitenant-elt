@@ -50,6 +50,15 @@ ARG SOURCE
 ARG REVISION
 ARG CREATED
 
+# ponytail: Temporary runtime apt patch to clear Debian CVE-2026-109518 on CI gate.
+# Sub-optimal layer pattern: base OS CVEs belong in the base image, but upstream
+# python:3.12-slim has not yet rebuilt with apt 3.0.4.
+# Removal condition: Delete this RUN block once dependabot bumps python:3.12-slim to a digest shipping apt >= 3.0.4.
+# hadolint ignore=DL3008
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y apt libapt-pkg7.0 && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --gid 1000 app && \
     useradd --uid 1000 --gid app --shell /bin/bash --create-home app
 
