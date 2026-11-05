@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Unified Google OAuth Renewal Wizard**: Added `multitenant-elt auth google` CLI command and `make auth-google` target to obtain and store permanent OAuth refresh tokens for all Google integrations (Google Ads, GA4, GTM, and YouTube). Supports both global agency credentials (via MCC / manager permissions) and client-isolated credentials (`_CLIENT` suffix).
+- **Automated Token Management**: Added `GoogleTokenManager` with automatic caching, proactive refresh before expiry, and automatic token invalidation and refresh on HTTP 401 Unauthorized responses across Google Ads, GTM, and YouTube connectors.
+
+### Changed
+
+- **Sunset Google Ads Developer Token**: Completely removed all references to `developer_token` / `GOOGLE_ADS_DEVELOPER_TOKEN` across code, schemas, and documentation following Google Ads API developer token sunset on September 9, 2026. Developer tokens are now ignored by the API and authorization is bound directly to Google Cloud projects.
+- **Hierarchical Credential Resolution**: Google connectors now look up client-specific OAuth refresh keys first (`GOOGLE_OAUTH_*_{CLIENT}`), then fall back to global agency keys (`GOOGLE_OAUTH_*`), and finally legacy connector-specific variables for backwards compatibility.
+
 ## [1.3.0] - 2026-11-04
 
 ### Added

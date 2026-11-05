@@ -29,6 +29,15 @@ SAMPLE_CONTAINERS_RESPONSE = {
     ]
 }
 
+SAMPLE_WORKSPACES_RESPONSE = {
+    "workspace": [
+        {
+            "workspaceId": "w1",
+            "name": "Default Workspace",
+        }
+    ]
+}
+
 SAMPLE_TAGS_RESPONSE = {
     "tag": [
         {
@@ -115,6 +124,27 @@ class TestContainers:
         with pytest.raises(Exception, match="Token expired"):
             list(get_containers("accounts/123456789", "bad-token"))
 
+    @patch("run_gtm.requests.get")
+    def test_token_manager_refresh_on_401(self, mock_get):
+        err_resp = MagicMock()
+        err_resp.status_code = 200
+        err_resp.json.return_value = {"error": {"code": 401, "message": "Token expired"}}
+
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = SAMPLE_CONTAINERS_RESPONSE
+
+        mock_get.side_effect = [err_resp, ok_resp]
+
+        mock_manager = MagicMock()
+        mock_manager.get_token.side_effect = ["expired_tok", "new_tok"]
+
+        rows = list(get_containers("accounts/123456789", token_manager=mock_manager))
+        assert len(rows) == 2
+        assert mock_get.call_count == 2
+        second_call_headers = mock_get.call_args_list[1][1]["headers"]
+        assert second_call_headers["Authorization"] == "Bearer new_tok"
+
 
 class TestTags:
     @patch("run_gtm.requests.get")
@@ -123,11 +153,15 @@ class TestTags:
         containers_resp.status_code = 200
         containers_resp.json.return_value = SAMPLE_CONTAINERS_RESPONSE
 
+        ws_resp = MagicMock()
+        ws_resp.status_code = 200
+        ws_resp.json.return_value = SAMPLE_WORKSPACES_RESPONSE
+
         tags_resp = MagicMock()
         tags_resp.status_code = 200
         tags_resp.json.return_value = SAMPLE_TAGS_RESPONSE
 
-        mock_get.side_effect = [containers_resp, tags_resp, tags_resp]
+        mock_get.side_effect = [containers_resp, ws_resp, tags_resp, ws_resp, tags_resp]
 
         rows = list(get_tags("accounts/123456789", "token"))
         assert len(rows) == 2
@@ -146,6 +180,10 @@ class TestTags:
         containers_resp = MagicMock()
         containers_resp.status_code = 200
         containers_resp.json.return_value = SAMPLE_CONTAINERS_RESPONSE
+
+        ws_resp = MagicMock()
+        ws_resp.status_code = 200
+        ws_resp.json.return_value = SAMPLE_WORKSPACES_RESPONSE
 
         tags_resp_1 = MagicMock()
         tags_resp_1.status_code = 200
@@ -177,7 +215,7 @@ class TestTags:
             ]
         }
 
-        mock_get.side_effect = [containers_resp, tags_resp_1, tags_resp_2]
+        mock_get.side_effect = [containers_resp, ws_resp, tags_resp_1, ws_resp, tags_resp_2]
 
         rows = list(get_tags("accounts/123456789", "token"))
         assert len(rows) == 2
@@ -194,11 +232,15 @@ class TestTags:
         containers_resp.status_code = 200
         containers_resp.json.return_value = SAMPLE_CONTAINERS_RESPONSE
 
+        ws_resp = MagicMock()
+        ws_resp.status_code = 200
+        ws_resp.json.return_value = SAMPLE_WORKSPACES_RESPONSE
+
         tags_resp = MagicMock()
         tags_resp.status_code = 200
         tags_resp.json.return_value = SAMPLE_TAGS_RESPONSE
 
-        mock_get.side_effect = [rate_resp, containers_resp, tags_resp, tags_resp]
+        mock_get.side_effect = [rate_resp, containers_resp, ws_resp, tags_resp, ws_resp, tags_resp]
 
         rows = list(get_tags("accounts/123456789", "token"))
         assert len(rows) == 2
@@ -211,11 +253,15 @@ class TestTriggers:
         containers_resp.status_code = 200
         containers_resp.json.return_value = SAMPLE_CONTAINERS_RESPONSE
 
+        ws_resp = MagicMock()
+        ws_resp.status_code = 200
+        ws_resp.json.return_value = SAMPLE_WORKSPACES_RESPONSE
+
         triggers_resp = MagicMock()
         triggers_resp.status_code = 200
         triggers_resp.json.return_value = SAMPLE_TRIGGERS_RESPONSE
 
-        mock_get.side_effect = [containers_resp, triggers_resp, triggers_resp]
+        mock_get.side_effect = [containers_resp, ws_resp, triggers_resp, ws_resp, triggers_resp]
 
         rows = list(get_triggers("accounts/123456789", "token"))
         assert len(rows) == 2
@@ -236,11 +282,15 @@ class TestTriggers:
         containers_resp.status_code = 200
         containers_resp.json.return_value = SAMPLE_CONTAINERS_RESPONSE
 
+        ws_resp = MagicMock()
+        ws_resp.status_code = 200
+        ws_resp.json.return_value = SAMPLE_WORKSPACES_RESPONSE
+
         triggers_resp = MagicMock()
         triggers_resp.status_code = 200
         triggers_resp.json.return_value = {"trigger": []}
 
-        mock_get.side_effect = [containers_resp, triggers_resp, triggers_resp]
+        mock_get.side_effect = [containers_resp, ws_resp, triggers_resp, ws_resp, triggers_resp]
 
         rows = list(get_triggers("accounts/123456789", "token"))
         assert len(rows) == 0

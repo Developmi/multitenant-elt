@@ -84,6 +84,20 @@ def cmd_auth_meta(args):
     )
 
 
+def cmd_auth_google(args):
+    from agency_analytics.google_auth import run_google_auth_wizard
+
+    services = [s.strip() for s in args.services.split(",")] if args.services else ["all"]
+    return run_google_auth_wizard(
+        client_name=args.client,
+        services=services,
+        client_id=args.client_id,
+        client_secret=args.client_secret,
+        env_path=args.env_path,
+        interactive=not args.non_interactive,
+    )
+
+
 def cli():
     parser = argparse.ArgumentParser(
         prog="multitenant-elt",
@@ -131,6 +145,30 @@ def cli():
         help="Run without interactive prompts (fails if required flags are omitted)",
     )
     p_meta.set_defaults(func=cmd_auth_meta)
+
+    p_google = auth_subparsers.add_parser(
+        "google",
+        help="Interactive unified Google OAuth refresh token wizard (Ads, GA4, GTM, YouTube)",
+    )
+    p_google.add_argument(
+        "--client",
+        default=None,
+        help="Target client ID for per-client keys, or omit for global agency credentials",
+    )
+    p_google.add_argument(
+        "--services",
+        default="all",
+        help="Comma-separated services: all, ga4, gtm, google_ads, youtube (default: all)",
+    )
+    p_google.add_argument("--client-id", default=None, help="Google OAuth Client ID")
+    p_google.add_argument("--client-secret", default=None, help="Google OAuth Client Secret")
+    p_google.add_argument("--env-path", default=".env", help="Path to .env file (default: .env)")
+    p_google.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Run without interactive prompts (fails if required flags are omitted)",
+    )
+    p_google.set_defaults(func=cmd_auth_google)
 
     args = parser.parse_args()
     return args.func(args)

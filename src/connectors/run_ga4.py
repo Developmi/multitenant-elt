@@ -20,8 +20,13 @@ def _get_access_token(client_email: str, private_key: str) -> str:
         raise ImportError("google-auth is required for GA4. Install it with: uv add google-auth")
 
     scopes = ["https://www.googleapis.com/auth/analytics.readonly"]
+    info = {
+        "client_email": client_email,
+        "private_key": private_key,
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
     creds = Credentials.from_service_account_info(
-        {"client_email": client_email, "private_key": private_key},
+        info,
         scopes=scopes,
     )
     creds.refresh(Request())
@@ -95,13 +100,25 @@ def _resolve_service_account(service_account_raw: str) -> dict:
     try:
         sa_decoded = base64.b64decode(service_account_raw).decode("utf-8")
         return json.loads(sa_decoded)
-    except (ValueError, json.JSONDecodeError):
-        if not os.path.exists(service_account_raw):
+    except Exception:
+        path = service_account_raw
+        if not os.path.exists(path):
+            clients_dir = client_config.resolve_clients_dir()
+            candidates = [
+                path.lstrip("/"),
+                os.path.join(clients_dir, "secrets", os.path.basename(path)),
+                os.path.join(clients_dir, os.path.basename(path)),
+            ]
+            for cand in candidates:
+                if os.path.exists(cand):
+                    path = cand
+                    break
+        if not os.path.exists(path):
             raise Exception(
                 "[GA4] service_account is neither a valid"
                 f" base64 JSON nor a file path: {service_account_raw}"
             )
-        with open(service_account_raw) as f:
+        with open(path) as f:
             return json.load(f)
 
 

@@ -601,14 +601,14 @@ class TestMissingEnvs:
         envs["TO_REFRESH_TOKEN"] = "r"
         assert client_config.missing_envs("tiktok_organic", section, environ=envs) == []
 
-    def test_google_reports_fixed_global_even_when_token_set(self):
+    def test_google_token_env_reported_when_unset(self):
         section = dict(_CLEAN_ENABLED["google"])  # token_env -> "GOOGLE_TOKEN"
-        missing = client_config.missing_envs("google", section, environ={"GOOGLE_TOKEN": "t"})
-        assert missing == ["GOOGLE_ADS_DEVELOPER_TOKEN"]
+        missing = client_config.missing_envs("google", section, environ={})
+        assert missing == ["GOOGLE_TOKEN"]
 
     def test_google_all_set_is_clean(self):
         section = dict(_CLEAN_ENABLED["google"])
-        envs = {"GOOGLE_TOKEN": "t", "GOOGLE_ADS_DEVELOPER_TOKEN": "d"}
+        envs = {"GOOGLE_TOKEN": "t"}
         assert client_config.missing_envs("google", section, environ=envs) == []
 
     def test_youtube_token_env_reported_by_helper(self):

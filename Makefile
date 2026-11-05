@@ -13,7 +13,7 @@ TOOLS := tools/bin
 .PHONY: lint-docker lint-actions lint-all test-security
 .PHONY: tools reinstall doctor
 .PHONY: clean pristine
-.PHONY: setup-networks setup-env pipeline auth-meta
+.PHONY: setup-networks setup-env pipeline auth-meta auth-google
 .PHONY: docker-build docker-build-pipeline
 .PHONY: docker-up docker-up-all docker-down docker-logs
 .PHONY: docker-db docker-pipeline docker-metabase
@@ -147,6 +147,9 @@ pipeline:       ## Run pipeline orchestration
 
 auth-meta:      ## Run interactive Meta token renewal wizard (usage: make auth-meta [CLIENT=acme])
 	@uv run python main.py auth meta $(if $(CLIENT),--client $(CLIENT),)
+
+auth-google:    ## Run interactive Google OAuth renewal wizard (usage: make auth-google [CLIENT=acme] [SERVICES=all])
+	@uv run python main.py auth google $(if $(CLIENT),--client $(CLIENT),) $(if $(SERVICES),--services $(SERVICES),)
 
 # === DOCKER - BUILD ========================================================
 

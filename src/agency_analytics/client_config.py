@@ -92,7 +92,7 @@ def output_schema(client_id: str) -> str:
 # applies its default silently; ``groups`` holds all-or-none key groups (the
 # youtube OAuth trio, C-S4); ``env_keys`` lists YAML keys whose values name
 # environment variables and ``env_globals`` fixed env names (google's
-# GOOGLE_ADS_DEVELOPER_TOKEN, read at run_google.py:240). Types are
+# optional globals (e.g. legacy global keys). Types are
 # str|int|bool only; ``int`` excludes bool and ``bool`` requires exact type.
 CONNECTOR_CONTRACT: dict[str, dict[str, Any]] = {
     "meta": {
@@ -111,7 +111,7 @@ CONNECTOR_CONTRACT: dict[str, dict[str, Any]] = {
         "required": {"customer_id": str, "token_env": str},
         "optional": {},
         "env_keys": ["token_env"],
-        "env_globals": ["GOOGLE_ADS_DEVELOPER_TOKEN"],
+        "env_globals": [],
     },
     "facebook": {
         "required": {"page_id": str, "token_env": str},
