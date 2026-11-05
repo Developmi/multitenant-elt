@@ -92,24 +92,34 @@
 
 ---
 
-## Phase 2 - Post-MVP
+## Phase 2 - Post-MVP (v1.x -> v2.0.0)
 
-Improvements planned for after the initial release is stable in production.
+Improvements planned for after the initial release and delivered in v2.0.0.
 
-### Observability
+### Observability & Orchestration
 
 - [x] Table `pipeline_runs` + `pipeline_run_steps` in Postgres (auto-created via init SQL)
 - [x] dbt staging + intermediate + mart models for pipeline monitoring data
+- [x] Native Python pipeline orchestrator (`src/agency_analytics/pipeline_runner.py`) replacing monolithic shell
+- [x] Dynamic connector plan execution (`src/agency_analytics/pipeline_plan.py`) from client YAML
+- [x] Centralized resilient HTTP client (`src/agency_analytics/http_client.py`) with exponential backoff on HTTP 429
+- [x] Diagnostic CLI tool relocated to `tools/diagnostics/ig_probe.py` with backward compatibility shim
 - [ ] Internal Metabase dashboard for pipeline monitoring
 - [ ] Telegram watchdog alert if pipeline hasn't run in 26 hours
 - [ ] Data volume metrics per connector and client
+
+### Authentication & Security
+
+- [x] Automatic OAuth token refresh (Meta, Google)
+- [x] Unified Google OAuth renewal wizard (`multitenant-elt auth google`) with `GoogleTokenManager`
+- [x] Meta Graph API token renewal wizard (`multitenant-elt auth meta`)
+- [x] Sunset Google Ads developer token across all models, schemas, and credentials
 
 ### More Connectors
 
 - [ ] LinkedIn Ads
 - [ ] Pinterest Ads (separate from organic)
 - [ ] Shopify (e-commerce clients)
-- [ ] Automatic OAuth token refresh (Meta, Google)
 
 ### Client Management
 
@@ -145,13 +155,29 @@ Evaluate when client count or data volume justifies it.
 
 ---
 
+## Technical Debt & Deferrals
+
+Tracked intentional trade-offs and deferrals documented under senior and Ponytail engineering principles.
+
+### 1. `archiver.py` Migration vs Native `dlt` Merge
+- **Status:** ⏳ Deferred / Deliberate Technical Debt (`ponytail debt`).
+- **Context:** `archiver.py` uses custom SQL (`INSERT ... ON CONFLICT`) for Instagram Business and TikTok Organic metrics snapshots.
+- **Evaluation:**
+  - *Performance:* Execution takes <0.05s nightly per client (~4 rows archived per tenant). Zero pipeline bottleneck.
+  - *Security:* Uses strictly parameterized SQL (`%s`) and safe identifier quotes; zero SQL injection vulnerability.
+  - *Cost/Benefit:* Migrating to native `dlt` merge would break live production PostgreSQL tables (which lack `_dlt_id` metadata columns and staging tables) and require rewriting 60+ unit tests with zero business or runtime performance gain.
+- **Decision:** Retain current stable implementation until a broader raw schema redesign is warranted.
+
+---
+
 ## Design Decisions
 
 | Decision | Outcome | Rationale |
 |---|---|---|
 | NocoDB | ❌ Not used | Metabase covers data inspection needs |
 | dbt Cloud | ❌ Not used | Free tier risk, prefer full control |
-| Prefect / Airflow | ⏳ Postponed to Phase 3 | Overengineering for MVP |
+| Prefect / Airflow | ⏳ Postponed to Phase 3 | Overengineering for current scale |
 | Email alerts | ❌ Not used | Telegram API is simpler than email OAuth |
 | Per-client database | ❌ Not used | Schema isolation is sufficient for MVP |
 | Config in Postgres | ⏳ Postponed to Phase 3 | YAML + Git is more auditable for now |
+| `archiver.py` custom SQL vs native `dlt` merge | ⏳ Postponed (Ponytail Debt) | Stable (<0.05s/run, 4 rows/night), zero security risk, avoids breaking production tables without user value |

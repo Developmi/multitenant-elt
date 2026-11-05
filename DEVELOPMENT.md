@@ -100,16 +100,21 @@ Add the connector definition block to `clients/_template.yml` with `enabled: fal
     token_env: CUSTOM_ACCESS_TOKEN_NEW_CLIENT
 ```
 
-### 3. Update Pipeline Script (`scripts/pipeline.sh`)
+### 3. Pipeline Discovery & Execution
 
-Register the connector execution block in `scripts/pipeline.sh` inside the per-client iteration loop:
+Connectors matching `src/connectors/run_<name>.py` and configured in `clients/<client_id>.yml` are dynamically resolved by `src/agency_analytics/pipeline_plan.py` and executed by the Python pipeline engine (`src/agency_analytics/pipeline_runner.py`). No bash script edits are required.
+
+To test the connector within the pipeline:
 
 ```bash
-if [ "$CUSTOM_ENABLED" = "true" ]; then
-    log_info "Running Custom connector for $CLIENT_ID..."
-    run_step "$CLIENT_ID" "custom" "python src/connectors/run_custom.py --client $CLIENT_ID"
-fi
+# Direct Python CLI run:
+uv run multitenant-elt pipeline --client <client_id>
+
+# Or via Make:
+make pipeline
 ```
+
+The host wrapper `scripts/pipeline.sh` also calls `multitenant-elt pipeline` inside the container for cron automation.
 
 ### 4. Create Unit Tests (`tests/test_run_<name>.py`)
 
@@ -118,6 +123,7 @@ Write comprehensive mock-based unit tests covering:
 - Rate-limiting (HTTP 429) backoff.
 - Authentication/token expiry (HTTP 401).
 - Missing configuration / invalid input fail-fast.
+- Maintain test coverage $\ge 85\%$ across all modules.
 
 ---
 
@@ -156,12 +162,12 @@ Transformations are managed with dbt Core in `src/dbt_project/`:
 Before opening a pull request, run the complete local quality gate:
 
 ```bash
-make quality
+make release-ready
 ```
 
 This runs sequentially:
-1. `make lint`: `uv run ruff check src/ tests/ main.py`
-2. `make typecheck`: `uv run mypy src/ main.py`
-3. `make test`: `uv run pytest tests/ -v`
+1. `make lint-all`: ruff check, ruff format check, mypy typecheck, actionlint, hadolint, zizmor
+2. `make test`: pytest suite (504+ passed tests with $\ge 85\%$ coverage)
+3. `make test-security`: Trivy vulnerability scan against `uv.lock`
 
 All tests must be deterministic and mock-based. Live network requests during automated tests are strictly prohibited.

@@ -6,11 +6,11 @@
 
 *Eliminate manual reporting across 10 marketing platforms - one pipeline, one dashboard, zero spreadsheets.*
 
-[![Version](https://img.shields.io/badge/Version-v1.3.0-blue?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v2.0.0-blue?style=for-the-badge)](CHANGELOG.md)
 [![Python](https://img.shields.io/badge/Python_3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)](pyproject.toml)
 [![Docker](https://img.shields.io/badge/Docker_|_READY-2496ED?style=for-the-badge&logo=docker&logoColor=white)](Dockerfile)
 [![CI](https://img.shields.io/badge/CI-Passing-brightgreen?style=for-the-badge)](.github/workflows)
-[![Tests](https://img.shields.io/badge/Tests-361%20passed-success?style=for-the-badge)](tests)
+[![Tests](https://img.shields.io/badge/Tests-504%20passed-success?style=for-the-badge)](tests)
 [![FinOps](https://img.shields.io/badge/FinOps-98%25%20OpEx%20Reduction-2ea44f?style=for-the-badge)](#-finops--cost-efficiency)
 [![Security](https://img.shields.io/badge/Security-Trivy%20%7C%20Cosign%20%7C%20SLSA-blue?style=for-the-badge)](SECURITY.md)
 [![Status](https://img.shields.io/badge/Status-Production_Active-brightgreen?style=for-the-badge)](#-features)
@@ -49,20 +49,35 @@ mindmap
 
 ## Table of contents
 
-- [Features](#-features)
-- [FinOps & Cost Efficiency](#-finops--cost-efficiency)
-- [Connector status](#-connector-status)
-- [Quick start](#-quick-start)
-- [Architecture](#-architecture)
-- [Docker deployment](#-docker-deployment)
-- [Configuration](#-configuration)
-- [Tests](#-tests)
-- [Security](#-security)
-- [Changelog](#-changelog)
-- [Roadmap](#-roadmap)
-- [Contributing](#-contributing)
-- [License](#-license)
-- [Contact & support](#-contact--support)
+
+- [Multitenant ELT | Developmi](#multitenant-elt--developmi)
+  - [Table of contents](#table-of-contents)
+  - [🎯 Features](#-features)
+  - [💰 FinOps \& Cost Efficiency](#-finops--cost-efficiency)
+  - [🔌 Connector status](#-connector-status)
+    - [Instagram diagnostics probe (read-only)](#instagram-diagnostics-probe-read-only)
+  - [⚡ Quick start](#-quick-start)
+    - [Prerequisites](#prerequisites)
+    - [1. Clone and configure](#1-clone-and-configure)
+    - [2. Start infrastructure](#2-start-infrastructure)
+    - [3. Run the pipeline](#3-run-the-pipeline)
+    - [4. Access Metabase (opt-in)](#4-access-metabase-opt-in)
+  - [🏗️ Architecture](#️-architecture)
+    - [Project structure](#project-structure)
+  - [🐳 Docker deployment](#-docker-deployment)
+    - [Build the pipeline image](#build-the-pipeline-image)
+    - [Start all services](#start-all-services)
+    - [Service isolation](#service-isolation)
+    - [Use a published image (`vX` tags)](#use-a-published-image-vx-tags)
+  - [🔧 Configuration](#-configuration)
+  - [🧪 Tests \& Quality Gate](#-tests--quality-gate)
+  - [🔑 Authentication \& Token Management](#-authentication--token-management)
+  - [🔒 Security](#-security)
+  - [📋 Changelog](#-changelog)
+  - [🗺️ Roadmap](#️-roadmap)
+  - [🤝 Contributing](#-contributing)
+  - [📄 License](#-license)
+  - [🤝 Contact \& support](#-contact--support)
 
 ---
 
@@ -72,9 +87,9 @@ mindmap
 - **Honest status tracking**: See [Connector status](#-connector-status) for which integrations are tested live vs. code-complete only
 - **Multi-tenant by design**: per-client raw namespaces and dbt output schemas (`raw_<connector>_<client_id>` / `client_<client_id>`), YAML client config, shared observability
 - **No-code connector config**: Add/remove platforms per client via YAML, no code changes
-- **Pipeline orchestration**: Health checks, per-client loops, Telegram alerts
+- **Pipeline orchestration**: Native Python engine (`pipeline_runner.py`), dynamic client execution plans, database run step metrics, health checks, and Telegram alerts
 - **dbt transformations**: 30 staging models → intermediate → marts (35 models total)
-- **Quality gate**: 362 tests (361 passed, 1 skipped), ruff linting, mypy type checking
+- **Quality gate**: 505 tests (504 passed, 1 skipped), ruff linting, mypy type checking, Trivy security scan
 - **Docker native**: Isolated services, two Docker networks, no vendor lock-in
 
 ---
@@ -112,8 +127,9 @@ mindmap
 
 ### Instagram diagnostics probe (read-only)
 
-`agency_analytics/ig_probe.py` is a **read-only** diagnostic CLI for the
-Instagram Business connector (never part of the scheduled pipeline). It answers
+`tools/diagnostics/ig_probe.py` is a **read-only** diagnostic CLI for the
+Instagram Business connector (never part of the scheduled pipeline). A 
+backward-compatible shim is maintained at `agency_analytics.ig_probe`. It answers
 which account-insights metrics respond today and with which `metric_type`, the
 real retention horizon per trailing window, which breakdown axes work per
 metric, and eligibility below 100 followers — the data that drives the
@@ -123,15 +139,15 @@ metric, and eligibility below 100 followers — the data that drives the
 docker exec -w /app/src agency_pipeline \
   python -m agency_analytics.ig_probe --client example --read-only
 
-# Local run, write the JSON report to a file, skip breakdown calls:
-uv run python -m agency_analytics.ig_probe --client example --read-only \
+# Local run with tools/diagnostics/ig_probe.py:
+uv run python tools/diagnostics/ig_probe.py --client example --read-only \
   --skip-breakdowns --output /tmp/ig_probe_report.json
 ```
 
 It makes no destructive calls and writes to no table (spec IG4). Full CLI
 reference, report schema and call budget live in the module docstring
-(`src/agency_analytics/ig_probe.py`). `scripts/pipeline.sh` is intentionally
-unchanged: the probe is a manual diagnostics entry point, not a pipeline step.
+(`tools/diagnostics/ig_probe.py`). The probe is a manual diagnostics entry point,
+not a pipeline step.
 
 ---
 
@@ -162,8 +178,15 @@ make docker-up-all     # Start Postgres, Pipeline, and Metabase (opt-in profile)
 
 ```bash
 make setup-env        # Ensure .env exists
-make test             # 361 tests should pass
-./scripts/pipeline.sh  # Full E2E pipeline (or use cron)
+make test             # 504 tests should pass
+
+# Run full Python E2E pipeline:
+make pipeline
+# Or execute via the native CLI for a single client:
+uv run multitenant-elt pipeline --client acme
+
+# For host cron automation (thin wrapper around container pipeline):
+./scripts/pipeline.sh
 ```
 
 ### 4. Access Metabase (opt-in)
@@ -184,7 +207,7 @@ user.
 - **Storage**: PostgreSQL 16 - per-client raw namespaces (`raw_meta_acme`, `raw_google_nike`, ...) plus shared observability (`public`, `staging`), transformed per client into `client_<id>` schemas
 - **Transformation**: dbt with multi-tenant routing - `generate_schema_name` sends tenant models to `client_<id>` and sources.yml jinja resolves each client's own raw namespace
 - **Visualization**: Metabase (opt-in compose profile) connected as `metabase_reader`, a read-only Postgres role that only exists when `METABASE_READER_ENABLED=true`
-- **Orchestration**: `./scripts/pipeline.sh` runs nightly via cron, validates Docker health, loops over active clients, sends Telegram summary
+- **Orchestration**: Native Python orchestrator (`multitenant-elt pipeline`) executed directly, via `make pipeline`, or nightly via cron wrapper `./scripts/pipeline.sh`; validates Docker health, dynamically executes client plans, tracks run steps in PostgreSQL, and sends Telegram summaries
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for full design.
 
@@ -298,7 +321,7 @@ See [.env.example](.env.example) for the full list of environment variables.
 ## 🧪 Tests & Quality Gate
 
 ```bash
-make test               # Run all tests (361 passed, 1 skipped)
+make test               # Run all tests (504 passed, 1 skipped)
 make lint               # ruff check
 make typecheck          # mypy
 make test-security      # Trivy vulnerability & secret scan

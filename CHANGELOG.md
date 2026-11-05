@@ -5,17 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - 2026-11-05
+
+### Breaking Changes
+
+- **Native Python Pipeline Orchestrator**: Migrated end-to-end pipeline orchestration from a 356-line bash script to a native Python engine (`multitenant-elt pipeline` / `src/agency_analytics/pipeline_runner.py`). `scripts/pipeline.sh` has been converted into a slim 30-line host wrapper. Eliminates 40+ container spawns per client, bash YAML parsing, and SQL string interpolation in favor of safe parameterized database records (`%s`), native PyYAML loading, and dynamic plan execution.
+- **Sunset Google Ads Developer Token**: Completely removed all references to `developer_token` / `GOOGLE_ADS_DEVELOPER_TOKEN` across code, schemas, and documentation following Google Ads API developer token deprecation. Authorization is now bound directly to Google Cloud projects and OAuth 2.0 consent.
+- **Diagnostic Tool Relocation**: Relocated the 713-line standalone CLI probe from `src/agency_analytics/ig_probe.py` to `tools/diagnostics/ig_probe.py` to decouple developer diagnostics from core pipeline runtime imports. A 19-line backward compatibility module is retained at `src/agency_analytics/ig_probe.py`.
 
 ### Added
 
+- **Centralized Resilient HTTP Client (`src/agency_analytics/http_client.py`)**: Unified Meta Graph API client with exponential backoff on HTTP 429 and Meta rate limit error codes (4, 17, 80000, 80004, 613), with fast-fail on token expiration (code 190).
 - **Unified Google OAuth Renewal Wizard**: Added `multitenant-elt auth google` CLI command and `make auth-google` target to obtain and store permanent OAuth refresh tokens for all Google integrations (Google Ads, GA4, GTM, and YouTube). Supports both global agency credentials (via MCC / manager permissions) and client-isolated credentials (`_CLIENT` suffix).
-- **Automated Token Management**: Added `GoogleTokenManager` with automatic caching, proactive refresh before expiry, and automatic token invalidation and refresh on HTTP 401 Unauthorized responses across Google Ads, GTM, and YouTube connectors.
+- **Automated Token Management**: Added `GoogleTokenManager` with automatic caching, proactive refresh before expiry, and automatic token invalidation and refresh on HTTP 401 Unauthorized responses across Google Ads, GTM, and YouTube connectors. Includes `.credentials` property returning official `google.oauth2.credentials.Credentials`.
+- **Pipeline Test Suite Expansion**: Expanded automated unit and integration tests to 504 passing tests (505 total, 1 skipped) with global test coverage reaching 94% (all modules $\ge 85\%$).
 
 ### Changed
 
-- **Sunset Google Ads Developer Token**: Completely removed all references to `developer_token` / `GOOGLE_ADS_DEVELOPER_TOKEN` across code, schemas, and documentation following Google Ads API developer token sunset on September 9, 2026. Developer tokens are now ignored by the API and authorization is bound directly to Google Cloud projects.
 - **Hierarchical Credential Resolution**: Google connectors now look up client-specific OAuth refresh keys first (`GOOGLE_OAUTH_*_{CLIENT}`), then fall back to global agency keys (`GOOGLE_OAUTH_*`), and finally legacy connector-specific variables for backwards compatibility.
+- **Dynamic Connector Execution**: Replaced hardcoded bash execution blocks with dynamic connector discovery driven by `pipeline_plan.py`.
 
 ## [1.3.0] - 2026-11-04
 
