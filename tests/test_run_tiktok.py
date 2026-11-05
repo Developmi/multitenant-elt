@@ -140,3 +140,98 @@ class TestTikTokAds:
 
         results = list(get_campaigns("987654321", "fake_token"))
         assert results[0]["budget_type"] == "LIFETIME"
+
+
+def test_tiktok_request_error_branches():
+    from dlt.sources.helpers import requests as dlt_requests
+    from run_tiktok import _tiktok_request
+
+    # RequestException
+    with patch("run_tiktok.requests.get", side_effect=dlt_requests.RequestException("Conn drop")):
+        with patch("time.sleep"):
+            with pytest.raises(dlt_requests.RequestException):
+                _tiktok_request("http://tiktok.test", max_retries=1)
+
+    # Rate limit 40004
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"code": 40004, "message": "Rate limit"}
+    with patch("run_tiktok.requests.get", return_value=mock_resp):
+        with patch("time.sleep"):
+            with pytest.raises(Exception, match="exceeded on rate limit"):
+                _tiktok_request("http://tiktok.test", max_retries=1)
+
+    # Generic error code
+    mock_resp_gen = MagicMock()
+    mock_resp_gen.json.return_value = {"code": 50000, "message": "Server fail"}
+    with patch("run_tiktok.requests.get", return_value=mock_resp_gen):
+        with pytest.raises(Exception, match="API error 50000"):
+            _tiktok_request("http://tiktok.test", max_retries=1)
+
+
+def test_tiktok_main_cli_branches(tmp_path, monkeypatch):
+    import sys
+
+    from run_tiktok import main
+
+    fake_file = tmp_path / "c.yml"
+    fake_file.write_text("active: false\n")
+
+    # Inactive
+    monkeypatch.setattr(sys, "argv", ["run_tiktok", "--client", "inactive"])
+    with patch("agency_analytics.client_config.client_file_path", return_value=str(fake_file)):
+        with patch("agency_analytics.client_config.load_client", return_value={"active": False}):
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0
+
+    # Validation errors
+    monkeypatch.setattr(sys, "argv", ["run_tiktok", "--client", "invalid"])
+    with patch("agency_analytics.client_config.client_file_path", return_value=str(fake_file)):
+        with patch("agency_analytics.client_config.load_client", return_value={"active": True}):
+            with patch("agency_analytics.client_config.validate_client", return_value=["Err"]):
+                with pytest.raises(SystemExit) as exc:
+                    main()
+                assert exc.value.code == 1
+
+    # Connector disabled
+    client_cfg = {"active": True, "connectors": {"tiktok": {"enabled": False}}}
+    monkeypatch.setattr(sys, "argv", ["run_tiktok", "--client", "disabled"])
+    with patch("agency_analytics.client_config.client_file_path", return_value=str(fake_file)):
+        with patch("agency_analytics.client_config.load_client", return_value=client_cfg):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with pytest.raises(SystemExit) as exc:
+                    main()
+                assert exc.value.code == 0
+
+    # Missing envs
+    client_cfg_active = {"active": True, "connectors": {"tiktok": {"enabled": True}}}
+    monkeypatch.setattr(sys, "argv", ["run_tiktok", "--client", "missing_env"])
+    with patch("agency_analytics.client_config.client_file_path", return_value=str(fake_file)):
+        with patch("agency_analytics.client_config.load_client", return_value=client_cfg_active):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with patch(
+                    "agency_analytics.client_config.missing_envs", return_value=["MISSING_KEY"]
+                ):
+                    with pytest.raises(SystemExit) as exc:
+                        main()
+                    assert exc.value.code == 1
+
+    # Success run
+    client_cfg_good = {
+        "active": True,
+        "connectors": {
+            "tiktok": {"enabled": True, "account_id": "act_tt", "token_env": "TT_TOKEN"}
+        },
+    }
+    monkeypatch.setattr(sys, "argv", ["run_tiktok", "--client", "good"])
+    monkeypatch.setenv("TT_TOKEN", "valid_tt_tok")
+    mock_pipeline = MagicMock()
+    mock_pipeline.run.return_value = "tt_ok"
+    with patch("agency_analytics.client_config.client_file_path", return_value=str(fake_file)):
+        with patch("agency_analytics.client_config.load_client", return_value=client_cfg_good):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with patch("agency_analytics.client_config.missing_envs", return_value=[]):
+                    with patch("dlt.pipeline", return_value=mock_pipeline):
+                        with patch("run_tiktok.tiktok_ads_source", return_value="dummy_tt_src"):
+                            main()
+                            mock_pipeline.run.assert_called_once()

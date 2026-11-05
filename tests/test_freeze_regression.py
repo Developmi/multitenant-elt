@@ -331,3 +331,45 @@ def test_db_backed_check_skips_without_dsn() -> None:
     client_result = check_table_via_db(None, IG_CHECK, client_id="acme")
     assert isinstance(client_result, Skipped)
     assert "DSN" in client_result.reason
+
+
+def test_row_key_missing_key_column_ignored() -> None:
+    """Rows with NULL in key column are dropped from distinct_keys calculation."""
+    rows = [
+        {"report_date": None, "reach": 100},
+        {"report_date": "2026-08-01", "reach": 100},
+        {"report_date": "2026-08-02", "reach": 100},
+    ]
+    report = check_rows(rows, IG_CHECK)
+    assert report.frozen == (FrozenMetric(column="reach", value=100, key_count=2),)
+
+
+def test_check_rows_explicit_columns_provided() -> None:
+    """Explicit columns parameter bypasses dynamic observation."""
+    rows = [{"report_date": "2026-08-01", "reach": 100}]
+    report = check_rows(rows, IG_CHECK, columns=["report_date", "reach", "unobserved_col"])
+    assert report.ok is True
+    assert report.columns == ("report_date", "reach", "unobserved_col")
+
+
+def test_check_table_via_db_with_dsn() -> None:
+    from unittest.mock import MagicMock, patch
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+    # First query (information_schema.columns) -> [("report_date",), ("reach",), ("follower_count",)]
+    # Second query (select data) -> [("2026-08-01", 100, 200), ("2026-08-02", 150, 205)]
+    mock_cursor.fetchall.side_effect = [
+        [("report_date",), ("reach",), ("follower_count",)],
+        [("2026-08-01", 100, 200), ("2026-08-02", 150, 205)],
+    ]
+
+    with patch("psycopg2.connect", return_value=mock_conn):
+        result = check_table_via_db(
+            "postgresql://user:pass@localhost:5432/db", IG_CHECK, client_id="acme"
+        )
+        assert not isinstance(result, Skipped)
+        assert result.ok is True
+        mock_conn.close.assert_called_once()

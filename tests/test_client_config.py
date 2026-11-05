@@ -623,3 +623,85 @@ class TestMissingEnvs:
         assert client_config.missing_envs("pinterest", section) == ["PINTEREST_TOKEN"]
         monkeypatch.setenv("PINTEREST_TOKEN", "1")
         assert client_config.missing_envs("pinterest", section) == []
+
+
+class TestSetupConnectorRun:
+    """Tests for setup_connector_run unified runner helper."""
+
+    def test_file_not_found(self, monkeypatch):
+        from unittest.mock import MagicMock, patch
+
+        args = MagicMock(client="nonexistent_xyz")
+        with patch("agency_analytics.client_config.os.path.exists", return_value=False):
+            with pytest.raises(SystemExit) as exc:
+                client_config.setup_connector_run("meta", args)
+            assert exc.value.code == 1
+
+    def test_inactive_client(self):
+        from unittest.mock import MagicMock, patch
+
+        args = MagicMock(client="inactive_client")
+        with patch("agency_analytics.client_config.os.path.exists", return_value=True):
+            with patch(
+                "agency_analytics.client_config.load_client", return_value={"active": False}
+            ):
+                with pytest.raises(SystemExit) as exc:
+                    client_config.setup_connector_run("meta", args)
+                assert exc.value.code == 0
+
+    def test_validation_errors(self):
+        from unittest.mock import MagicMock, patch
+
+        args = MagicMock(client="invalid_client")
+        with patch("agency_analytics.client_config.os.path.exists", return_value=True):
+            with patch("agency_analytics.client_config.load_client", return_value={"active": True}):
+                with patch(
+                    "agency_analytics.client_config.validate_client",
+                    return_value=["Validation error"],
+                ):
+                    with pytest.raises(SystemExit) as exc:
+                        client_config.setup_connector_run("meta", args)
+                    assert exc.value.code == 1
+
+    def test_connector_disabled(self):
+        from unittest.mock import MagicMock, patch
+
+        args = MagicMock(client="disabled_client")
+        client_data = {"active": True, "connectors": {"meta": {"enabled": False}}}
+        with patch("agency_analytics.client_config.os.path.exists", return_value=True):
+            with patch("agency_analytics.client_config.load_client", return_value=client_data):
+                with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                    with pytest.raises(SystemExit) as exc:
+                        client_config.setup_connector_run("meta", args)
+                    assert exc.value.code == 0
+
+    def test_missing_envs(self):
+        from unittest.mock import MagicMock, patch
+
+        args = MagicMock(client="missing_env_client")
+        client_data = {"active": True, "connectors": {"meta": {"enabled": True}}}
+        with patch("agency_analytics.client_config.os.path.exists", return_value=True):
+            with patch("agency_analytics.client_config.load_client", return_value=client_data):
+                with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                    with patch(
+                        "agency_analytics.client_config.missing_envs",
+                        return_value=["META_ACCESS_TOKEN"],
+                    ):
+                        with pytest.raises(SystemExit) as exc:
+                            client_config.setup_connector_run("meta", args)
+                        assert exc.value.code == 1
+
+    def test_success(self):
+        from unittest.mock import MagicMock, patch
+
+        args = MagicMock(client="good_client")
+        conn_cfg = {"enabled": True, "account_id": "act_123"}
+        client_data = {"active": True, "connectors": {"meta": conn_cfg}}
+        with patch("agency_analytics.client_config.os.path.exists", return_value=True):
+            with patch("agency_analytics.client_config.load_client", return_value=client_data):
+                with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                    with patch("agency_analytics.client_config.missing_envs", return_value=[]):
+                        c, conn, path = client_config.setup_connector_run("meta", args)
+                        assert c == client_data
+                        assert conn == conn_cfg
+                        assert "good_client" in path

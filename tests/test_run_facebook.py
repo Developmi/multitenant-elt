@@ -1,9 +1,11 @@
 import json
 import os
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
+from dlt.sources.helpers import requests as dlt_requests
 
 MODULE = "run_facebook"
 
@@ -738,3 +740,257 @@ def test_page_profile_resource_declares_column_hints():
         assert column in hints, f"column {column} needs a dlt nullable hint"
         assert hints[column]["data_type"] == data_type
         assert hints[column]["nullable"] is True
+
+
+def test_should_retry_branches():
+    from run_facebook import _should_retry
+
+    assert _should_retry({}) == (False, None)
+
+    # Rate limit with string wait
+    retry, wait = _should_retry({"error": {"code": 80000, "error_user_title": "str_wait"}})
+    assert retry is True
+    assert wait == 60
+
+    # Rate limit with subcode
+    retry, wait = _should_retry({"error": {"code": 4, "error_subcode": 15}})
+    assert retry is True
+    assert wait == 15
+
+    # Code 190
+    with pytest.raises(Exception, match="Invalid or expired token"):
+        _should_retry({"error": {"code": 190, "message": "Expired"}})
+
+    # Other code
+    with pytest.raises(Exception, match="API error 500"):
+        _should_retry({"error": {"code": 500, "message": "Internal"}})
+
+
+def test_execute_batch_error_branches():
+    from run_facebook import _execute_batch
+
+    # HTTPError 429
+    mock_resp = MagicMock()
+    mock_resp.status_code = 429
+    mock_resp.json.return_value = {"error": {"code": 4, "message": "Rate limited"}}
+    http_err = dlt_requests.HTTPError(response=mock_resp)
+
+    with patch("run_facebook.requests.post", side_effect=http_err):
+        with patch("run_facebook.time.sleep"):
+            with pytest.raises(Exception, match="Batch rate limit exceeded"):
+                _execute_batch([{"method": "GET", "relative_url": "test"}], "tok")
+
+    # HTTPError 190
+    mock_resp.status_code = 400
+    mock_resp.json.return_value = {"error": {"code": 190, "message": "Expired"}}
+    http_err_190 = dlt_requests.HTTPError(response=mock_resp)
+    with patch("run_facebook.requests.post", side_effect=http_err_190):
+        with pytest.raises(Exception, match="Invalid or expired token"):
+            _execute_batch([{"method": "GET", "relative_url": "test"}], "tok")
+
+    # RequestException
+    with patch(
+        "run_facebook.requests.post", side_effect=dlt_requests.RequestException("Conn drop")
+    ):
+        with patch("run_facebook.time.sleep"):
+            with pytest.raises(Exception, match="Batch request failed after"):
+                _execute_batch([{"method": "GET", "relative_url": "test"}], "tok")
+
+
+def test_do_request_branches():
+    from run_facebook import _do_request, _get_reaction
+
+    # _get_reaction flat
+    assert _get_reaction({"r_like": 42}, "r_like") == 42
+    assert _get_reaction({}, "r_like") == 0
+
+    # HTTP 500 reduce limit
+    mock_resp_500 = MagicMock()
+    mock_resp_500.status_code = 500
+    mock_resp_500.json.return_value = {"error": {"message": "Please reduce the amount of data"}}
+    err_500 = dlt_requests.HTTPError(response=mock_resp_500)
+
+    mock_resp_ok = MagicMock()
+    mock_resp_ok.json.return_value = {"data": [{"id": "ok"}]}
+
+    with patch("run_facebook.requests.get", side_effect=[err_500, mock_resp_ok]):
+        with patch("run_facebook.time.sleep"):
+            params = {"limit": 50}
+            data = _do_request("http://fb.test", params, "test_ctx", retries=2)
+            assert data == {"data": [{"id": "ok"}]}
+            assert params["limit"] == 25
+
+    # HTTP code 100 invalid parameter
+    mock_resp_100 = MagicMock()
+    mock_resp_100.status_code = 400
+    mock_resp_100.json.return_value = {"error": {"code": 100, "message": "Invalid param"}}
+    err_100 = dlt_requests.HTTPError(response=mock_resp_100)
+    with patch("run_facebook.requests.get", side_effect=err_100):
+        with pytest.raises(Exception, match="Invalid parameter"):
+            _do_request("http://fb.test", {}, "ctx", retries=1)
+
+    # HTTP code 190 expired token
+    mock_resp_190 = MagicMock()
+    mock_resp_190.status_code = 400
+    mock_resp_190.json.return_value = {"error": {"code": 190, "message": "Expired"}}
+    err_190 = dlt_requests.HTTPError(response=mock_resp_190)
+    with patch("run_facebook.requests.get", side_effect=err_190):
+        with pytest.raises(Exception, match="Token expired"):
+            _do_request("http://fb.test", {}, "ctx", retries=1)
+
+    # HTTP 429 rate limit exceeded
+    mock_resp_429 = MagicMock()
+    mock_resp_429.status_code = 429
+    mock_resp_429.json.return_value = {"error": {"code": 4, "message": "Rate limit"}}
+    err_429 = dlt_requests.HTTPError(response=mock_resp_429)
+    with patch("run_facebook.requests.get", side_effect=err_429):
+        with patch("run_facebook.time.sleep"):
+            with pytest.raises(Exception, match="Rate limit exceeded"):
+                _do_request("http://fb.test", {}, "ctx", retries=1)
+
+    # HTTP generic error 503
+    mock_resp_503 = MagicMock()
+    mock_resp_503.status_code = 503
+    mock_resp_503.json.return_value = {"error": {"code": 503, "message": "Unavailable"}}
+    err_503 = dlt_requests.HTTPError(response=mock_resp_503)
+    with patch("run_facebook.requests.get", side_effect=err_503):
+        with pytest.raises(Exception, match="API error: Unavailable"):
+            _do_request("http://fb.test", {}, "ctx", retries=1)
+
+    # RequestException retry and raise
+    with patch("run_facebook.requests.get", side_effect=dlt_requests.RequestException("Drop")):
+        with patch("run_facebook.time.sleep"):
+            with pytest.raises(dlt_requests.RequestException):
+                _do_request("http://fb.test", {}, "ctx", retries=1)
+
+    # Data with retry code exceeded
+    with patch(
+        "run_facebook.requests.get", return_value=MagicMock(json=lambda: {"error": {"code": 4}})
+    ):
+        with patch("run_facebook.time.sleep"):
+            with pytest.raises(Exception, match="Rate limit exceeded"):
+                _do_request("http://fb.test", {}, "ctx", retries=1)
+
+
+def test_fetch_batch_posts_errors():
+    from run_facebook import _fetch_page_batch
+
+    # Results not a list or < 2 items
+    with patch("run_facebook._execute_batch", return_value={"bad": "format"}):
+        with pytest.raises(Exception, match="Batch returned unexpected format"):
+            _fetch_page_batch("posts", "p1", "tok")
+
+    # Sub-request code != 200
+    with patch(
+        "run_facebook._execute_batch",
+        return_value=[{"code": 400, "body": "err"}, {"code": 200, "body": "{}"}],
+    ):
+        with pytest.raises(Exception, match="Batch sub-request 0 failed"):
+            _fetch_page_batch("posts", "p1", "tok")
+
+    # Sub-request invalid json body
+    with patch(
+        "run_facebook._execute_batch",
+        return_value=[{"code": 200, "body": "invalid_json"}, {"code": 200, "body": "{}"}],
+    ):
+        with pytest.raises(Exception, match="parse error"):
+            _fetch_page_batch("posts", "p1", "tok")
+
+
+def test_facebook_cli_main(monkeypatch, tmp_path):
+    import runpy
+    import sys
+
+    # 1. Client file not found -> exit(1)
+    monkeypatch.setattr(sys, "argv", ["run_facebook", "--client", "nonexistent"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(tmp_path / "absent.yml")
+    ):
+        with pytest.raises(SystemExit) as exc:
+            runpy.run_path("src/connectors/run_facebook.py", run_name="__main__")
+        assert exc.value.code == 1
+
+    # 2. Inactive client -> exit(0)
+    fake_client_file = tmp_path / "client.yml"
+    fake_client_file.write_text("active: false\n")
+    monkeypatch.setattr(sys, "argv", ["run_facebook", "--client", "inactive_client"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch("agency_analytics.client_config.load_client", return_value={"active": False}):
+            with pytest.raises(SystemExit) as exc:
+                runpy.run_path("src/connectors/run_facebook.py", run_name="__main__")
+            assert exc.value.code == 0
+
+    # 3. Validation errors -> exit(1)
+    monkeypatch.setattr(sys, "argv", ["run_facebook", "--client", "invalid_client"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch("agency_analytics.client_config.load_client", return_value={"active": True}):
+            with patch(
+                "agency_analytics.client_config.validate_client", return_value=["Some error"]
+            ):
+                with pytest.raises(SystemExit) as exc:
+                    runpy.run_path("src/connectors/run_facebook.py", run_name="__main__")
+                assert exc.value.code == 1
+
+    # 4. Connector not enabled -> exit(0)
+    monkeypatch.setattr(sys, "argv", ["run_facebook", "--client", "disabled_client"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch(
+            "agency_analytics.client_config.load_client",
+            return_value={"active": True, "connectors": {"facebook": {"enabled": False}}},
+        ):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with pytest.raises(SystemExit) as exc:
+                    runpy.run_path("src/connectors/run_facebook.py", run_name="__main__")
+                assert exc.value.code == 0
+
+    # 5. Missing envs -> exit(1)
+    monkeypatch.setattr(sys, "argv", ["run_facebook", "--client", "missing_env_client"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch(
+            "agency_analytics.client_config.load_client",
+            return_value={"active": True, "connectors": {"facebook": {"enabled": True}}},
+        ):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with patch(
+                    "agency_analytics.client_config.missing_envs", return_value=["MISSING_KEY"]
+                ):
+                    with pytest.raises(SystemExit) as exc:
+                        runpy.run_path("src/connectors/run_facebook.py", run_name="__main__")
+                    assert exc.value.code == 1
+
+    # 6. Success run
+    monkeypatch.setattr(sys, "argv", ["run_facebook", "--client", "good_client"])
+    monkeypatch.setenv("FB_TOKEN", "valid_tok")
+    client_cfg = {
+        "active": True,
+        "connectors": {
+            "facebook": {
+                "enabled": True,
+                "page_id": "p123",
+                "token_env": "FB_TOKEN",
+                "insights_days_back": 30,
+            }
+        },
+    }
+    mock_pipeline = MagicMock()
+    mock_pipeline.run.return_value = "pipeline_ok"
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch("agency_analytics.client_config.load_client", return_value=client_cfg):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with patch("agency_analytics.client_config.missing_envs", return_value=[]):
+                    with patch("dlt.pipeline", return_value=mock_pipeline):
+                        with patch(
+                            "run_facebook.facebook_page_source", return_value="dummy_source"
+                        ):
+                            runpy.run_path("src/connectors/run_facebook.py", run_name="__main__")
+                            mock_pipeline.run.assert_called_once()

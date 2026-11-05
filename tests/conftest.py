@@ -2,19 +2,10 @@
 
 import json
 import os
-import sys
 import tempfile
 from unittest.mock import patch
 
 import pytest
-
-# Add dlt_scripts directory to path so all tests can import modules directly
-SCRIPTS_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "02-pipeline",
-    "dlt_scripts",
-)
-sys.path.insert(0, SCRIPTS_DIR)
 
 GA4_SERVICE_ACCOUNT_JSON = {
     "client_email": "test@example.com",

@@ -176,7 +176,7 @@ def pinterest_source(access_token: str, board_id: str | None = None):
     ]
 
 
-if __name__ == "__main__":
+def main():
     from dotenv import load_dotenv
 
     try:
@@ -188,36 +188,7 @@ if __name__ == "__main__":
     parser.add_argument("--client", required=True, help="Client ID from clients/ YAML")
     args = parser.parse_args()
 
-    client_file = client_config.client_file_path(args.client)
-
-    if not os.path.exists(client_file):
-        print(f"[PINTEREST] Client file not found: {client_file}")
-        exit(1)
-
-    client = client_config.load_client(args.client)
-
-    if not client.get("active", True):
-        print(f"[PINTEREST] Client {args.client} is not active. Skipping.")
-        exit(0)
-
-    errors = client_config.validate_client(client)
-    if errors:
-        for error in errors:
-            print(f"[PINTEREST] {error}")
-        exit(1)
-
-    connector = client["connectors"].get("pinterest", {})
-    if not connector.get("enabled"):
-        print(f"[PINTEREST] Pinterest connector not enabled for client {args.client}. Skipping.")
-        exit(0)
-
-    missing = client_config.missing_envs("pinterest", connector)
-    if missing:
-        for env_name in missing:
-            print(
-                f"[PINTEREST] Environment variable {env_name} is not set for client {args.client}."
-            )
-        exit(1)
+    _, connector, _ = client_config.setup_connector_run("pinterest", args)
 
     board_id = connector.get("board_id") or None
     token_env = connector["token_env"]
@@ -232,3 +203,7 @@ if __name__ == "__main__":
     )
     info = pipeline.run(pinterest_source(access_token, board_id))
     print(f"[PINTEREST] Done: {info}")
+
+
+if __name__ == "__main__":
+    main()
