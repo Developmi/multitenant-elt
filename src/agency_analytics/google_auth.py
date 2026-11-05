@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
+import dotenv
 from dlt.sources.helpers import requests
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -51,6 +52,22 @@ class GoogleTokenManager:
         self._refresh_token = refresh_token
         self._access_token: str | None = None
         self._expires_at: float = 0.0
+        self._credentials: Any | None = None
+
+    @property
+    def credentials(self) -> Any:
+        """Return the official google.oauth2.credentials.Credentials instance."""
+        from google.oauth2.credentials import Credentials
+
+        if self._credentials is None:
+            self._credentials = Credentials(
+                token=self._access_token,
+                refresh_token=self._refresh_token,
+                token_uri=GOOGLE_TOKEN_URL,
+                client_id=self._client_id,
+                client_secret=self._client_secret,
+            )
+        return self._credentials
 
     def get_token(self) -> str:
         """Return a valid access token, auto-refreshing if expired or uninitialized."""
@@ -188,33 +205,16 @@ def update_client_env(
     refresh_token: str,
 ) -> None:
     """Save or update Google OAuth credentials in .env file cleanly."""
+    if not env_path.exists():
+        env_path.touch()
     suffix = f"_{client_name.upper()}" if client_name else ""
-    keys_to_set = {
-        f"GOOGLE_OAUTH_CLIENT_ID{suffix}": client_id,
-        f"GOOGLE_OAUTH_CLIENT_SECRET{suffix}": client_secret,
-        f"GOOGLE_OAUTH_REFRESH_TOKEN{suffix}": refresh_token,
-    }
-
-    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
-    seen: set[str] = set()
-    new_lines: list[str] = []
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            k, _, _ = stripped.partition("=")
-            clean_k = k.strip()
-            if clean_k in keys_to_set:
-                new_lines.append(f"{clean_k}={keys_to_set[clean_k]}")
-                seen.add(clean_k)
-                continue
-        new_lines.append(line)
-
-    for k, v in keys_to_set.items():
-        if k not in seen:
-            new_lines.append(f"{k}={v}")
-
-    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    dotenv.set_key(str(env_path), f"GOOGLE_OAUTH_CLIENT_ID{suffix}", client_id, quote_mode="never")
+    dotenv.set_key(
+        str(env_path), f"GOOGLE_OAUTH_CLIENT_SECRET{suffix}", client_secret, quote_mode="never"
+    )
+    dotenv.set_key(
+        str(env_path), f"GOOGLE_OAUTH_REFRESH_TOKEN{suffix}", refresh_token, quote_mode="never"
+    )
 
 
 class _OAuthRedirectHandler(BaseHTTPRequestHandler):

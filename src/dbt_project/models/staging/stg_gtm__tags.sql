@@ -1,5 +1,20 @@
+{%- set source_relation = source('raw_gtm', 'tags') -%}
+{%- set relation_exists = adapter.get_relation(database=source_relation.database, schema=source_relation.schema, identifier=source_relation.identifier) is not none -%}
+
 with source as (
-    select * from {{ source('raw_gtm', 'tags') }}
+    {%- if relation_exists %}
+    select * from {{ source_relation }}
+    {%- else %}
+    select
+        null::varchar as tag_id,
+        null::varchar as container_id,
+        null::varchar as type,
+        null::varchar as name,
+        null::json as firing_triggers,
+        null::json as blocking_triggers,
+        null::varchar as tag_manager_url
+    where false
+    {%- endif %}
 ),
 
 renamed as (

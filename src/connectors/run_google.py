@@ -233,28 +233,7 @@ def main():
     parser.add_argument("--client", required=True, help="Client ID from clients/ YAML")
     args = parser.parse_args()
 
-    client_file = client_config.client_file_path(args.client)
-
-    if not os.path.exists(client_file):
-        print(f"[GOOGLE] Client file not found: {client_file}")
-        sys.exit(1)
-
-    client = client_config.load_client(args.client)
-
-    if not client.get("active", True):
-        print(f"[GOOGLE] Client {args.client} is not active. Skipping.")
-        sys.exit(0)
-
-    errors = client_config.validate_client(client)
-    if errors:
-        for error in errors:
-            print(f"[GOOGLE] {error}")
-        sys.exit(1)
-
-    connector = client.get("connectors", {}).get("google", {})
-    if not connector.get("enabled"):
-        print(f"[GOOGLE] Google Ads connector not enabled for client {args.client}. Skipping.")
-        sys.exit(0)
+    client, connector, _ = client_config.setup_connector_run("google", args)
 
     customer_id = connector["customer_id"]
 

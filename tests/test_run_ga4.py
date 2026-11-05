@@ -99,8 +99,11 @@ SAMPLE_EVENT_RESPONSE = {
 
 
 @pytest.fixture(autouse=True)
-def mock_ga4_auth():
-    """Evita que los tests intenten usar google-auth real."""
+def mock_ga4_auth(request):
+    """Evita que los tests intenten usar google-auth real salvo si tienen mark no_mock_auth."""
+    if "no_mock_auth" in request.keywords:
+        yield
+        return
     with patch("run_ga4._get_access_token", return_value="fake-token"):
         yield
 
@@ -303,3 +306,117 @@ class TestMainFailFast:
         assert "[GA4]" in out
         assert 'missing required key "service_account"' in out
         assert "Traceback" not in out
+
+    def test_main_client_file_not_found(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLIENTS_DIR", str(tmp_path))
+        with patch("sys.argv", ["run_ga4.py", "--client", "nonexistent"]):
+            with pytest.raises(SystemExit) as exc:
+                runpy.run_path(_RUN_GA4_PATH, run_name="__main__")
+            assert exc.value.code == 1
+
+    def test_main_inactive_client(self, tmp_path, monkeypatch):
+        client_dir = tmp_path / "clients"
+        client_dir.mkdir(exist_ok=True)
+        (client_dir / "inactive.yml").write_text("active: false\n", encoding="utf-8")
+        monkeypatch.setenv("CLIENTS_DIR", str(client_dir))
+
+        with patch("sys.argv", ["run_ga4.py", "--client", "inactive"]):
+            with pytest.raises(SystemExit) as exc:
+                runpy.run_path(_RUN_GA4_PATH, run_name="__main__")
+            assert exc.value.code == 0
+
+    def test_main_connector_disabled(self, tmp_path, monkeypatch):
+        client_dir = tmp_path / "clients"
+        client_dir.mkdir(exist_ok=True)
+        (client_dir / "disabled.yml").write_text(
+            "active: true\nconnectors:\n  ga4:\n    enabled: false\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("CLIENTS_DIR", str(client_dir))
+
+        with patch("sys.argv", ["run_ga4.py", "--client", "disabled"]):
+            with pytest.raises(SystemExit) as exc:
+                runpy.run_path(_RUN_GA4_PATH, run_name="__main__")
+            assert exc.value.code == 0
+
+    def test_main_success_run(self, tmp_path, monkeypatch):
+        import base64
+        import json
+
+        sa_dict = {"client_email": "e@test.com", "private_key": "k"}
+        sa_b64 = base64.b64encode(json.dumps(sa_dict).encode()).decode()
+
+        client_dir = tmp_path / "clients"
+        client_dir.mkdir(exist_ok=True)
+        (client_dir / "good.yml").write_text(
+            yaml.safe_dump(
+                {
+                    "client_id": "good",
+                    "active": True,
+                    "connectors": {
+                        "ga4": {
+                            "enabled": True,
+                            "property_id": "12345",
+                            "service_account": sa_b64,
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("CLIENTS_DIR", str(client_dir))
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.run.return_value = "ga4_ok"
+
+        with patch("sys.argv", ["run_ga4.py", "--client", "good"]):
+            with patch("dlt.pipeline", return_value=mock_pipeline):
+                with patch("run_ga4.ga4_source", return_value="dummy_ga4_src"):
+                    runpy.run_path(_RUN_GA4_PATH, run_name="__main__")
+                    mock_pipeline.run.assert_called_once()
+
+
+@pytest.mark.no_mock_auth
+def test_ga4_get_access_token():
+    from run_ga4 import _get_access_token
+
+    mock_creds = MagicMock()
+    mock_creds.token = "ga4_fresh_tok"
+
+    with patch(
+        "google.oauth2.service_account.Credentials.from_service_account_info",
+        return_value=mock_creds,
+    ):
+        tok = _get_access_token("test@email.com", "pk")
+        assert tok == "ga4_fresh_tok"
+        mock_creds.refresh.assert_called_once()
+
+
+def test_ga4_run_report_branches():
+    from dlt.sources.helpers import requests as dlt_requests
+    from run_ga4 import _run_report
+
+    # RequestException in post
+    with patch("run_ga4.requests.post", side_effect=dlt_requests.RequestException("Conn drop")):
+        with pytest.raises(dlt_requests.RequestException):
+            _run_report("123", "tok", {})
+
+    # 429 in data
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"error": {"code": 429}}
+    with patch("run_ga4.requests.post", return_value=mock_resp):
+        with patch("time.sleep"):
+            assert _run_report("123", "tok", {}) is None
+
+    # 400 Bad request
+    mock_resp.json.return_value = {"error": {"code": 400, "message": "Invalid field"}}
+    with patch("run_ga4.requests.post", return_value=mock_resp):
+        with pytest.raises(Exception, match="Bad request"):
+            _run_report("123", "tok", {})
+
+    # 500 API error
+    mock_resp.json.return_value = {"error": {"code": 500, "message": "Server fail"}}
+    with patch("run_ga4.requests.post", return_value=mock_resp):
+        with pytest.raises(Exception, match="API error 500"):
+            _run_report("123", "tok", {})

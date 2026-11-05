@@ -595,6 +595,23 @@ class TestHandleResponse:
         result = _handle_response(mock_resp, "test")
         assert result is None
 
+    def test_handle_response_500_raises(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"error": {"code": 500, "message": "internal error"}}
+        with pytest.raises(Exception, match="API error 500"):
+            _handle_response(mock_resp, "test")
+
+    def test_api_get_request_exception_raises(self):
+        from dlt.sources.helpers import requests as dlt_requests
+        from run_youtube import _api_get
+
+        with patch(
+            "dlt.sources.helpers.requests.get",
+            side_effect=dlt_requests.RequestException("Conn drop"),
+        ):
+            with pytest.raises(dlt_requests.RequestException):
+                _api_get("http://yt.test", {}, "test_ctx", api_key="k")
+
 
 class TestMainBootstrap:
     """Main-driven regression (SDD-C WU2, M-S2b): youtube leniency preserved.
@@ -633,3 +650,288 @@ class TestMainBootstrap:
         assert "[YOUTUBE]" in out
         assert "Environment variable YOUTUBE_API_KEY_UNSET_TEST is not set." in out
         assert "Skipping YouTube" in out
+
+    def test_client_file_not_found(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLIENTS_DIR", str(tmp_path))
+        with patch("sys.argv", ["run_youtube.py", "--client", "missing"]):
+            with pytest.raises(SystemExit) as exc:
+                runpy.run_path(_RUN_YOUTUBE_PATH, run_name="__main__")
+        assert exc.value.code == 1
+
+    def test_inactive_client(self, tmp_path, monkeypatch):
+        client_dir = tmp_path / "clients"
+        client_dir.mkdir(exist_ok=True)
+        (client_dir / "inactive.yml").write_text("active: false\n", encoding="utf-8")
+        monkeypatch.setenv("CLIENTS_DIR", str(client_dir))
+
+        with patch("sys.argv", ["run_youtube.py", "--client", "inactive"]):
+            with pytest.raises(SystemExit) as exc:
+                runpy.run_path(_RUN_YOUTUBE_PATH, run_name="__main__")
+        assert exc.value.code == 0
+
+    def test_connector_disabled(self, tmp_path, monkeypatch):
+        client_dir = tmp_path / "clients"
+        client_dir.mkdir(exist_ok=True)
+        (client_dir / "disabled.yml").write_text(
+            "active: true\nconnectors:\n  youtube:\n    enabled: false\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("CLIENTS_DIR", str(client_dir))
+
+        with patch("sys.argv", ["run_youtube.py", "--client", "disabled"]):
+            with pytest.raises(SystemExit) as exc:
+                runpy.run_path(_RUN_YOUTUBE_PATH, run_name="__main__")
+        assert exc.value.code == 0
+
+    def test_success_run_with_oauth(self, tmp_path, monkeypatch):
+        client_dir = tmp_path / "clients"
+        client_dir.mkdir(exist_ok=True)
+        (client_dir / "good.yml").write_text(
+            yaml.safe_dump(
+                {
+                    "client_id": "good",
+                    "active": True,
+                    "connectors": {
+                        "youtube": {
+                            "enabled": True,
+                            "channel_id": "UC123",
+                            "token_env": "YT_API_KEY",
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("CLIENTS_DIR", str(client_dir))
+        monkeypatch.setenv("YT_API_KEY", "valid_key")
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.run.return_value = "yt_ok"
+        oauth_creds = {"client_id": "cid", "client_secret": "sec", "refresh_token": "rt"}
+
+        mock_ch_resp = MagicMock()
+        mock_ch_resp.status_code = 200
+        mock_ch_resp.json.return_value = {
+            "items": [{"contentDetails": {"relatedPlaylists": {"uploads": "UPL123"}}}]
+        }
+
+        with patch("sys.argv", ["run_youtube.py", "--client", "good"]):
+            with patch(
+                "agency_analytics.google_auth.resolve_google_credentials", return_value=oauth_creds
+            ):
+                with patch("dlt.sources.helpers.requests.get", return_value=mock_ch_resp):
+                    with patch("dlt.pipeline", return_value=mock_pipeline):
+                        runpy.run_path(_RUN_YOUTUBE_PATH, run_name="__main__")
+                        mock_pipeline.run.assert_called_once()
+
+    def test_success_run_with_legacy_oauth_env_keys(self, tmp_path, monkeypatch):
+        client_dir = tmp_path / "clients"
+        client_dir.mkdir(exist_ok=True)
+        (client_dir / "legacy_yt.yml").write_text(
+            yaml.safe_dump(
+                {
+                    "client_id": "legacy_yt",
+                    "active": True,
+                    "connectors": {
+                        "youtube": {
+                            "enabled": True,
+                            "channel_id": "UC123",
+                            "token_env": "YT_API_KEY",
+                            "oauth_client_id_env": "LEGACY_CID",
+                            "oauth_client_secret_env": "LEGACY_SEC",
+                            "oauth_refresh_token_env": "LEGACY_RT",
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("CLIENTS_DIR", str(client_dir))
+        monkeypatch.setenv("YT_API_KEY", "valid_key")
+        monkeypatch.setenv("LEGACY_CID", "legacy_client_id")
+        monkeypatch.setenv("LEGACY_SEC", "legacy_client_secret")
+        monkeypatch.setenv("LEGACY_RT", "legacy_refresh_token")
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.run.return_value = "yt_ok"
+
+        mock_ch_resp = MagicMock()
+        mock_ch_resp.status_code = 200
+        mock_ch_resp.json.return_value = {
+            "items": [{"contentDetails": {"relatedPlaylists": {"uploads": "UPL123"}}}]
+        }
+
+        with patch("sys.argv", ["run_youtube.py", "--client", "legacy_yt"]):
+            with patch(
+                "agency_analytics.google_auth.resolve_google_credentials", return_value=None
+            ):
+                with patch("dlt.sources.helpers.requests.get", return_value=mock_ch_resp):
+                    with patch("dlt.pipeline", return_value=mock_pipeline):
+                        runpy.run_path(_RUN_YOUTUBE_PATH, run_name="__main__")
+                        mock_pipeline.run.assert_called_once()
+
+
+class TestAdditionalResources:
+    @patch("run_youtube._api_get")
+    def test_get_playlist_items(self, mock_api_get):
+        from run_youtube import get_playlist_items
+
+        mock_api_get.side_effect = [
+            {"items": [{"id": "pl1"}]},  # get_playlists
+            {
+                "items": [
+                    {
+                        "id": "item1",
+                        "snippet": {
+                            "playlistId": "pl1",
+                            "title": "Item Title",
+                            "position": 0,
+                            "publishedAt": "2024-01-01T00:00:00Z",
+                            "videoPublishedAt": "2024-01-01T00:00:00Z",
+                        },
+                        "contentDetails": {"videoId": "vid1"},
+                        "status": {"privacyStatus": "public"},
+                    }
+                ],
+                "nextPageToken": None,
+            },
+        ]
+
+        items = list(get_playlist_items("UC123", "uploads_pl", "key"))
+        assert len(items) == 1
+        assert items[0]["playlist_item_id"] == "item1"
+        assert items[0]["video_id"] == "vid1"
+
+    @patch("run_youtube._api_get")
+    def test_get_playlist_items_fallback_to_uploads(self, mock_api_get):
+        from run_youtube import get_playlist_items
+
+        mock_api_get.side_effect = [
+            {"items": []},  # no playlists returned
+            {
+                "items": [
+                    {
+                        "id": "upl_item",
+                        "snippet": {"playlistId": "upl_pl", "title": "Upl"},
+                        "contentDetails": {"videoId": "v_upl"},
+                    }
+                ],
+                "nextPageToken": None,
+            },
+        ]
+        items = list(get_playlist_items("UC123", "upl_pl", "key"))
+        assert len(items) == 1
+        assert items[0]["playlist_item_id"] == "upl_item"
+
+    @patch("run_youtube._api_get")
+    def test_get_comment_threads(self, mock_api_get):
+        from run_youtube import get_comment_threads
+
+        mock_api_get.return_value = {
+            "items": [
+                {
+                    "id": "thread1",
+                    "snippet": {
+                        "videoId": "vid1",
+                        "topLevelComment": {
+                            "snippet": {
+                                "authorDisplayName": "Alice",
+                                "authorChannelId": {"value": "UC_alice"},
+                                "textOriginal": "Great video!",
+                                "likeCount": 10,
+                                "publishedAt": "2024-01-01",
+                                "updatedAt": "2024-01-01",
+                            }
+                        },
+                        "totalReplyCount": 1,
+                        "isPublic": True,
+                        "canReply": True,
+                    },
+                    "replies": {
+                        "comments": [
+                            {
+                                "id": "reply1",
+                                "snippet": {
+                                    "authorDisplayName": "Bob",
+                                    "textOriginal": "Thanks!",
+                                    "likeCount": 2,
+                                    "publishedAt": "2024-01-02",
+                                    "updatedAt": "2024-01-02",
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+            "nextPageToken": None,
+        }
+
+        threads = list(get_comment_threads("UC123", "key"))
+        assert len(threads) == 1
+        assert threads[0]["comment_id"] == "thread1"
+        assert threads[0]["author_display_name"] == "Alice"
+        assert len(threads[0]["replies"]) == 1
+        assert threads[0]["replies"][0]["author_display_name"] == "Bob"
+
+    @patch("run_youtube._api_get")
+    def test_get_channel_sections(self, mock_api_get):
+        from run_youtube import get_channel_sections
+
+        mock_api_get.return_value = {
+            "items": [
+                {
+                    "id": "sec1",
+                    "snippet": {"type": "singlePlaylist", "title": "Section Title", "position": 0},
+                    "contentDetails": {"playlists": ["pl1"], "channels": []},
+                }
+            ]
+        }
+
+        sections = list(get_channel_sections("UC123", "key"))
+        assert len(sections) == 1
+        assert sections[0]["section_id"] == "sec1"
+        assert sections[0]["title"] == "Section Title"
+
+    @patch("run_youtube._api_get")
+    def test_get_video_categories(self, mock_api_get):
+        from run_youtube import get_video_categories
+
+        mock_api_get.return_value = {
+            "items": [
+                {
+                    "id": "cat1",
+                    "snippet": {"title": "Music", "assignable": True, "channelId": "UC_yt"},
+                }
+            ]
+        }
+
+        categories = list(get_video_categories("key"))
+        assert len(categories) == 1
+        assert categories[0]["category_id"] == "cat1"
+        assert categories[0]["title"] == "Music"
+
+    @patch("run_youtube._enumerate_uploads")
+    @patch("run_youtube._api_get")
+    def test_get_captions(self, mock_api_get, mock_enumerate):
+        from run_youtube import get_captions
+
+        mock_enumerate.return_value = ["vid1"]
+        mock_api_get.return_value = {
+            "items": [
+                {
+                    "id": "cap1",
+                    "snippet": {
+                        "videoId": "vid1",
+                        "language": "en",
+                        "name": "English",
+                        "trackKind": "standard",
+                        "status": "serving",
+                    },
+                }
+            ]
+        }
+
+        captions = list(get_captions("UC123", "uploads_pl", MagicMock()))
+        assert len(captions) == 1
+        assert captions[0]["caption_id"] == "cap1"
+        assert captions[0]["language"] == "en"

@@ -188,3 +188,113 @@ class TestGoogleAdsConnector:
                 with pytest.raises(SystemExit) as exc:
                     main()
         assert exc.value.code == 1
+
+    def test_google_request_error_branches(self, mock_sleep):
+        from dlt.sources.helpers import requests as dlt_requests
+        from run_google import _google_request
+
+        # RequestException retry and raise
+        with patch(
+            "dlt.sources.helpers.requests.post",
+            side_effect=dlt_requests.RequestException("Conn drop"),
+        ):
+            with pytest.raises(dlt_requests.RequestException):
+                _google_request("http://test", {}, {}, max_retries=2)
+
+        # 429 max retries
+        with patch(
+            "dlt.sources.helpers.requests.post", return_value=_mock_429_response(retry_delay="10s")
+        ):
+            with pytest.raises(Exception, match="exceeded on rate limit"):
+                _google_request("http://test", {}, {}, max_retries=1)
+
+        # 403 access denied
+        with patch(
+            "dlt.sources.helpers.requests.post", return_value=_mock_error_response(403, "Forbidden")
+        ):
+            with pytest.raises(Exception, match="Access denied: Forbidden"):
+                _google_request("http://test", {}, {}, max_retries=1)
+
+        # generic error
+        with patch(
+            "dlt.sources.helpers.requests.post",
+            return_value=_mock_error_response(500, "Internal Server"),
+        ):
+            with pytest.raises(Exception, match="API error 500"):
+                _google_request("http://test", {}, {}, max_retries=1)
+
+    def test_google_main_branches(self, tmp_path):
+        import sys
+
+        from run_google import main
+
+        fake_file = tmp_path / "c.yml"
+        fake_file.write_text("active: true\n")
+
+        # 1. Inactive client -> exit(0)
+        with patch.object(sys, "argv", ["run_google", "--client", "c"]):
+            with patch("os.path.exists", return_value=True):
+                with patch(
+                    "agency_analytics.client_config.load_client", return_value={"active": False}
+                ):
+                    with pytest.raises(SystemExit) as exc:
+                        main()
+                    assert exc.value.code == 0
+
+        # 2. Validation error -> exit(1)
+        with patch.object(sys, "argv", ["run_google", "--client", "c"]):
+            with patch("os.path.exists", return_value=True):
+                with patch(
+                    "agency_analytics.client_config.load_client", return_value={"active": True}
+                ):
+                    with patch(
+                        "agency_analytics.client_config.validate_client", return_value=["Err"]
+                    ):
+                        with pytest.raises(SystemExit) as exc:
+                            main()
+                        assert exc.value.code == 1
+
+        # 3. Connector disabled -> exit(0)
+        client_cfg = {"active": True, "connectors": {"google": {"enabled": False}}}
+        with patch.object(sys, "argv", ["run_google", "--client", "c"]):
+            with patch("os.path.exists", return_value=True):
+                with patch("agency_analytics.client_config.load_client", return_value=client_cfg):
+                    with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                        with pytest.raises(SystemExit) as exc:
+                            main()
+                        assert exc.value.code == 0
+
+        # 4. Missing credentials -> exit(1)
+        client_cfg_active = {
+            "active": True,
+            "connectors": {"google": {"enabled": True, "customer_id": "123"}},
+        }
+        with patch.object(sys, "argv", ["run_google", "--client", "c"]):
+            with patch("os.path.exists", return_value=True):
+                with patch(
+                    "agency_analytics.client_config.load_client", return_value=client_cfg_active
+                ):
+                    with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                        with patch("run_google.resolve_google_credentials", return_value=None):
+                            with pytest.raises(SystemExit) as exc:
+                                main()
+                            assert exc.value.code == 1
+
+        # 5. Success run with oauth_creds
+        oauth_creds = {"client_id": "cid", "client_secret": "sec", "refresh_token": "rt"}
+        mock_pipeline = MagicMock()
+        with patch.object(sys, "argv", ["run_google", "--client", "c"]):
+            with patch("os.path.exists", return_value=True):
+                with patch(
+                    "agency_analytics.client_config.load_client", return_value=client_cfg_active
+                ):
+                    with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                        with patch(
+                            "run_google.resolve_google_credentials", return_value=oauth_creds
+                        ):
+                            with patch("dlt.pipeline", return_value=mock_pipeline):
+                                with patch(
+                                    "run_google.google_ads_source", return_value="dummy_src"
+                                ):
+                                    main()
+                                    mock_pipeline.run.assert_called_once()

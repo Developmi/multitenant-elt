@@ -13,9 +13,11 @@ import pytest
 from agency_analytics.google_auth import (
     GoogleAuthError,
     GoogleTokenManager,
+    _OAuthRedirectHandler,
     build_authorization_url,
     get_scopes_for_services,
     resolve_google_credentials,
+    run_google_auth_wizard,
     update_client_env,
 )
 
@@ -108,6 +110,61 @@ class TestGoogleTokenManager:
             with pytest.raises(GoogleAuthError, match="Token has been expired or revoked"):
                 manager.get_token()
 
+    def test_get_token_network_error_raises(self):
+        manager = GoogleTokenManager(
+            client_id="test_client_id",
+            client_secret="test_secret",
+            refresh_token="test_refresh_token",
+        )
+        with patch(
+            "agency_analytics.google_auth.requests.post", side_effect=Exception("Connection reset")
+        ):
+            with pytest.raises(GoogleAuthError, match="Network error"):
+                manager.get_token()
+
+    def test_get_token_json_error_raises(self):
+        manager = GoogleTokenManager(
+            client_id="test_client_id",
+            client_secret="test_secret",
+            refresh_token="test_refresh_token",
+        )
+        mock_resp = MagicMock()
+        mock_resp.status_code = 502
+        mock_resp.json.side_effect = ValueError("Bad JSON")
+        with patch("agency_analytics.google_auth.requests.post", return_value=mock_resp):
+            with pytest.raises(GoogleAuthError, match="Failed to parse"):
+                manager.get_token()
+
+    def test_invalidate_and_refresh(self):
+        manager = GoogleTokenManager(
+            client_id="test_client_id",
+            client_secret="test_secret",
+            refresh_token="test_refresh_token",
+        )
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"access_token": "fresh_tok", "expires_in": 3600}
+        with patch("agency_analytics.google_auth.requests.post", return_value=mock_resp):
+            tok = manager._refresh()
+            assert tok == "fresh_tok"
+            manager.invalidate()
+            assert manager._access_token is None
+            assert manager._expires_at == 0.0
+
+    def test_credentials_property(self):
+        from google.oauth2.credentials import Credentials
+
+        manager = GoogleTokenManager(
+            client_id="test_client_id",
+            client_secret="test_secret",
+            refresh_token="test_refresh_token",
+        )
+        creds = manager.credentials
+        assert isinstance(creds, Credentials)
+        assert creds.client_id == "test_client_id"
+        assert creds.client_secret == "test_secret"
+        assert creds.refresh_token == "test_refresh_token"
+
 
 class TestResolveGoogleCredentials:
     """Tests for multi-tenant credential hierarchy resolution."""
@@ -159,6 +216,24 @@ class TestResolveGoogleCredentials:
         assert creds["client_id"] == "legacy_yt_id"
         assert creds["client_secret"] == "legacy_yt_secret"
         assert creds["refresh_token"] == "legacy_yt_refresh"
+
+    def test_resolves_legacy_client_specific_keys(self, monkeypatch):
+        """Resolves client-specific legacy YOUTUBE_OAUTH_*_{CLIENT} keys."""
+        for var in [
+            "GOOGLE_OAUTH_CLIENT_ID",
+            "GOOGLE_OAUTH_CLIENT_SECRET",
+            "GOOGLE_OAUTH_REFRESH_TOKEN",
+        ]:
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("YOUTUBE_OAUTH_CLIENT_ID_ACME", "yt_acme_id")
+        monkeypatch.setenv("YOUTUBE_OAUTH_CLIENT_SECRET_ACME", "yt_acme_sec")
+        monkeypatch.setenv("YOUTUBE_OAUTH_REFRESH_TOKEN_ACME", "yt_acme_rt")
+
+        creds = resolve_google_credentials(client_name="acme", service="youtube")
+        assert creds is not None
+        assert creds["client_id"] == "yt_acme_id"
+        assert creds["client_secret"] == "yt_acme_sec"
+        assert creds["refresh_token"] == "yt_acme_rt"
 
     def test_returns_none_when_unconfigured(self, monkeypatch):
         """Returns None if neither client-specific nor global OAuth credentials exist."""
@@ -250,6 +325,23 @@ class TestUpdateClientEnv:
         assert "GOOGLE_OAUTH_CLIENT_SECRET_CLIENT_DEMO=demo_secret" in content
         assert "GOOGLE_OAUTH_REFRESH_TOKEN_CLIENT_DEMO=demo_refresh" in content
 
+    def test_update_client_env_overwrites_existing(self, tmp_path):
+        """Overwrites existing keys if they are already present in the env file."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("GOOGLE_OAUTH_CLIENT_ID=old_id\nGOOGLE_OAUTH_CLIENT_SECRET=old_sec\n")
+        update_client_env(
+            env_path=env_file,
+            client_name=None,
+            client_id="new_id",
+            client_secret="new_sec",
+            refresh_token="new_rt",
+        )
+        content = env_file.read_text()
+        assert "GOOGLE_OAUTH_CLIENT_ID=new_id" in content
+        assert "GOOGLE_OAUTH_CLIENT_SECRET=new_sec" in content
+        assert "GOOGLE_OAUTH_REFRESH_TOKEN=new_rt" in content
+        assert "old_id" not in content
+
 
 class TestCliAuthGoogle:
     """Tests for CLI integration of auth google command."""
@@ -268,38 +360,223 @@ class TestCliAuthGoogle:
         finally:
             sys.argv = old_argv
 
-    @patch("agency_analytics.google_auth.run_google_auth_wizard")
-    def test_cli_auth_google_invokes_wizard(self, mock_wizard):
-        import sys
 
-        from agency_analytics.cli import cli
+class TestOAuthRedirectHandler:
+    """Tests for the loopback HTTP redirect handler."""
 
-        mock_wizard.return_value = 0
-        old_argv = sys.argv
-        sys.argv = [
-            "multitenant-elt",
-            "auth",
-            "google",
-            "--client",
-            "acme",
-            "--services",
-            "ga4,gtm",
-            "--non-interactive",
-            "--client-id",
-            "cid",
-            "--client-secret",
-            "sec",
-        ]
-        try:
-            exit_code = cli()
-            assert exit_code == 0
-            mock_wizard.assert_called_once_with(
-                client_name="acme",
-                services=["ga4", "gtm"],
-                client_id="cid",
-                client_secret="sec",
-                env_path=".env",
-                interactive=False,
-            )
-        finally:
-            sys.argv = old_argv
+    def test_handler_success(self):
+        handler = _OAuthRedirectHandler.__new__(_OAuthRedirectHandler)
+        handler.path = "/?code=sample_auth_code"
+        handler.server = MagicMock()
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.wfile = MagicMock()
+
+        handler.do_GET()
+        assert handler.server.auth_code == "sample_auth_code"
+        handler.send_response.assert_called_with(200)
+
+    def test_handler_error(self):
+        handler = _OAuthRedirectHandler.__new__(_OAuthRedirectHandler)
+        handler.path = "/?error=access_denied"
+        handler.server = MagicMock()
+        handler.send_response = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.wfile = MagicMock()
+
+        handler.do_GET()
+        assert handler.server.auth_error == "access_denied"
+        handler.send_response.assert_called_with(400)
+
+    def test_handler_log_message_silent(self):
+        handler = _OAuthRedirectHandler.__new__(_OAuthRedirectHandler)
+        # Should not raise
+        handler.log_message("format", "arg1")
+
+
+class TestRunGoogleAuthWizard:
+    """Tests for the interactive and non-interactive Google OAuth wizard."""
+
+    def test_wizard_invalid_services(self, capsys):
+        ret = run_google_auth_wizard(services=["invalid_srv"])
+        assert ret == 1
+        out = capsys.readouterr().out
+        assert "No valid services specified" in out
+
+    def test_wizard_non_interactive_missing_client_id(self, monkeypatch, capsys):
+        monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
+        monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_SECRET", raising=False)
+        ret = run_google_auth_wizard(interactive=False, client_id=None)
+        assert ret == 1
+        out = capsys.readouterr().out
+        assert "Missing required --client-id" in out
+
+    def test_wizard_non_interactive_missing_client_secret(self, monkeypatch, capsys):
+        monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
+        monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_SECRET", raising=False)
+        ret = run_google_auth_wizard(interactive=False, client_id="cid", client_secret=None)
+        assert ret == 1
+        out = capsys.readouterr().out
+        assert "Missing required --client-secret" in out
+
+    @patch("agency_analytics.google_auth.HTTPServer")
+    def test_wizard_server_auth_error(self, mock_server_cls, capsys):
+        mock_server = MagicMock()
+
+        def fake_handle():
+            mock_server.auth_error = "access_denied"
+            mock_server.auth_code = None
+
+        mock_server.handle_request.side_effect = fake_handle
+        mock_server_cls.return_value = mock_server
+
+        ret = run_google_auth_wizard(
+            client_id="cid",
+            client_secret="sec",
+            interactive=False,
+            no_browser=True,
+        )
+        assert ret == 1
+        out = capsys.readouterr().out
+        assert "Authorization error: access_denied" in out
+
+    @patch("agency_analytics.google_auth.HTTPServer")
+    def test_wizard_server_missing_code(self, mock_server_cls, capsys):
+        mock_server = MagicMock()
+        mock_server_cls.return_value = mock_server
+
+        ret = run_google_auth_wizard(
+            client_id="cid",
+            client_secret="sec",
+            interactive=False,
+            no_browser=True,
+        )
+        assert ret == 1
+        out = capsys.readouterr().out
+        assert "Failed to obtain authorization code" in out
+
+    @patch("agency_analytics.google_auth.requests.post")
+    @patch("agency_analytics.google_auth.HTTPServer")
+    def test_wizard_token_exchange_network_error(self, mock_server_cls, mock_post, capsys):
+        mock_server = MagicMock()
+
+        def fake_handle():
+            mock_server.auth_code = "valid_code"
+            mock_server.auth_error = None
+
+        mock_server.handle_request.side_effect = fake_handle
+        mock_server_cls.return_value = mock_server
+        mock_post.side_effect = Exception("Connection timeout")
+
+        ret = run_google_auth_wizard(
+            client_id="cid",
+            client_secret="sec",
+            interactive=False,
+            no_browser=True,
+        )
+        assert ret == 1
+        out = capsys.readouterr().out
+        assert "Token exchange request failed" in out
+
+    @patch("agency_analytics.google_auth.requests.post")
+    @patch("agency_analytics.google_auth.HTTPServer")
+    def test_wizard_token_exchange_http_error(self, mock_server_cls, mock_post, capsys):
+        mock_server = MagicMock()
+
+        def fake_handle():
+            mock_server.auth_code = "valid_code"
+            mock_server.auth_error = None
+
+        mock_server.handle_request.side_effect = fake_handle
+        mock_server_cls.return_value = mock_server
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_resp.json.return_value = {
+            "error": "invalid_grant",
+            "error_description": "Code expired",
+        }
+        mock_post.return_value = mock_resp
+
+        ret = run_google_auth_wizard(
+            client_id="cid",
+            client_secret="sec",
+            interactive=False,
+            no_browser=True,
+        )
+        assert ret == 1
+        out = capsys.readouterr().out
+        assert "Token exchange failed (invalid_grant)" in out
+        assert "The authorization code expired" in out
+
+    @patch("agency_analytics.google_auth.update_client_env")
+    @patch("agency_analytics.google_auth.requests.post")
+    @patch("agency_analytics.google_auth.HTTPServer")
+    def test_wizard_success(self, mock_server_cls, mock_post, mock_update, tmp_path, capsys):
+        mock_server = MagicMock()
+
+        def fake_handle():
+            mock_server.auth_code = "valid_code"
+            mock_server.auth_error = None
+
+        mock_server.handle_request.side_effect = fake_handle
+        mock_server_cls.return_value = mock_server
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "refresh_token": "1//permanent_refresh_token_xyz",
+            "access_token": "ya29.sample",
+        }
+        mock_post.return_value = mock_resp
+
+        env_file = tmp_path / ".env"
+        ret = run_google_auth_wizard(
+            client_id="cid",
+            client_secret="sec",
+            env_path=env_file,
+            interactive=False,
+            no_browser=True,
+        )
+        assert ret == 0
+        out = capsys.readouterr().out
+        assert "SUCCESS: Received Permanent Google OAuth Refresh Token" in out
+        mock_update.assert_called_once()
+
+    @patch("agency_analytics.google_auth.update_client_env")
+    @patch("agency_analytics.google_auth.requests.post")
+    @patch("agency_analytics.google_auth.HTTPServer")
+    @patch("agency_analytics.google_auth.webbrowser.open")
+    def test_wizard_interactive_prompts(
+        self, mock_browser, mock_server_cls, mock_post, mock_update, monkeypatch, tmp_path
+    ):
+        mock_server = MagicMock()
+
+        def fake_handle():
+            mock_server.auth_code = "valid_code"
+            mock_server.auth_error = None
+
+        mock_server.handle_request.side_effect = fake_handle
+        mock_server_cls.return_value = mock_server
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"refresh_token": "rt_1234567890"}
+        mock_post.return_value = mock_resp
+
+        # Interactive inputs: use existing = n, prompt new id = new_id, secret = new_sec
+        inputs = iter(["n", "new_id"])
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+        monkeypatch.setattr("getpass.getpass", lambda prompt="": "new_secret")
+        monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "existing_id")
+        monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "existing_sec")
+
+        ret = run_google_auth_wizard(
+            client_name="testclient",
+            env_path=tmp_path / ".env",
+            interactive=True,
+            no_browser=False,
+        )
+        assert ret == 0
+        mock_browser.assert_called_once()
