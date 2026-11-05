@@ -1,18 +1,21 @@
 import argparse
 import json
 import os
+import sys
 import time
 
 import dlt
 from dlt.sources.helpers import requests
 
 from agency_analytics import client_config
+from agency_analytics.google_auth import GoogleTokenManager, resolve_google_credentials
 
-GTM_API_BASE = "https://tagmanager.googleapis.com/v2"
+GTM_API_BASE = "https://tagmanager.googleapis.com/tagmanager/v2"
 
 
-def _headers(access_token: str):
-    return {"Authorization": f"Bearer {access_token}"}
+def _headers(access_token: str = "", token_manager: GoogleTokenManager | None = None):
+    token = token_manager.get_token() if token_manager is not None else access_token
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _handle_response(response, context: str):
@@ -51,63 +54,94 @@ def _handle_response(response, context: str):
     return data
 
 
-@dlt.resource(name="containers", write_disposition="replace")
-def get_containers(account_path: str, access_token: str):
-    url = f"{GTM_API_BASE}/{account_path}/containers"
+def _get_with_refresh(
+    url: str,
+    context: str,
+    access_token: str = "",
+    token_manager: GoogleTokenManager | None = None,
+):
+    refreshed_on_401 = False
     while True:
         try:
-            response = requests.get(url, headers=_headers(access_token))
+            response = requests.get(url, headers=_headers(access_token, token_manager))
         except requests.RequestException as e:
-            print(f"[GTM] Request error (containers): {e}")
+            print(f"[GTM] Request error ({context}): {e}")
             raise
 
-        data = _handle_response(response, "containers")
-        if data is None:
-            continue
+        try:
+            data = _handle_response(response, context)
+            if data is None:
+                continue
+            return data
+        except Exception as exc:
+            if "Token expired" in str(exc) and token_manager is not None and not refreshed_on_401:
+                refreshed_on_401 = True
+                token_manager._access_token = None
+                continue
+            raise
 
-        for container in data.get("container", []):
-            yield {
-                "container_id": container.get("containerId"),
-                "account_id": container.get("accountId"),
-                "name": container.get("name"),
-                "public_id": container.get("publicId"),
-                "usage_context": json.dumps(container.get("usageContext", [])),
-            }
-        break
+
+@dlt.resource(name="containers", write_disposition="replace")
+def get_containers(
+    account_path: str,
+    access_token: str = "",
+    token_manager: GoogleTokenManager | None = None,
+):
+    url = f"{GTM_API_BASE}/{account_path}/containers"
+    data = _get_with_refresh(
+        url, "containers", access_token=access_token, token_manager=token_manager
+    )
+    for container in data.get("container", []):
+        yield {
+            "container_id": container.get("containerId"),
+            "account_id": container.get("accountId"),
+            "name": container.get("name"),
+            "public_id": container.get("publicId"),
+            "usage_context": json.dumps(container.get("usageContext", [])),
+        }
 
 
 @dlt.resource(name="tags", write_disposition="replace")
-def get_tags(account_path: str, access_token: str):
+def get_tags(
+    account_path: str,
+    access_token: str = "",
+    token_manager: GoogleTokenManager | None = None,
+):
     containers_url = f"{GTM_API_BASE}/{account_path}/containers"
-    container_ids = []
+    containers_data = _get_with_refresh(
+        containers_url,
+        "containers list for tags",
+        access_token=access_token,
+        token_manager=token_manager,
+    )
 
-    while True:
-        try:
-            containers_resp = requests.get(containers_url, headers=_headers(access_token))
-        except requests.RequestException as e:
-            print(f"[GTM] Request error (containers list for tags): {e}")
-            raise
-
-        containers_data = _handle_response(containers_resp, "containers list for tags")
-        if containers_data is None:
-            continue
-
-        for c in containers_data.get("container", []):
-            container_ids.append(c["containerId"])
-        break
+    container_ids = [c["containerId"] for c in containers_data.get("container", [])]
 
     for cid in container_ids:
-        tags_url = f"{GTM_API_BASE}/{account_path}/containers/{cid}/tags"
-        while True:
-            try:
-                tags_resp = requests.get(tags_url, headers=_headers(access_token))
-            except requests.RequestException as e:
-                print(f"[GTM] Request error (tags container {cid}): {e}")
-                raise
+        workspaces_url = f"{GTM_API_BASE}/{account_path}/containers/{cid}/workspaces"
+        ws_data = _get_with_refresh(
+            workspaces_url,
+            f"workspaces container {cid}",
+            access_token=access_token,
+            token_manager=token_manager,
+        )
+        workspaces = [w["workspaceId"] for w in ws_data.get("workspace", [])]
+        workspace_paths = (
+            [
+                f"{GTM_API_BASE}/{account_path}/containers/{cid}/workspaces/{wid}/tags"
+                for wid in workspaces
+            ]
+            if workspaces
+            else [f"{GTM_API_BASE}/{account_path}/containers/{cid}/tags"]
+        )
 
-            tags_data = _handle_response(tags_resp, f"tags container {cid}")
-            if tags_data is None:
-                continue
+        for tags_url in workspace_paths:
+            tags_data = _get_with_refresh(
+                tags_url,
+                f"tags container {cid}",
+                access_token=access_token,
+                token_manager=token_manager,
+            )
 
             for tag in tags_data.get("tag", []):
                 firing = tag.get("firingTriggerId", [])
@@ -125,41 +159,49 @@ def get_tags(account_path: str, access_token: str):
                     "blocking_triggers": json.dumps(blocking),
                     "tag_manager_url": tag_manager_url,
                 }
-            break
 
 
 @dlt.resource(name="triggers", write_disposition="replace")
-def get_triggers(account_path: str, access_token: str):
+def get_triggers(
+    account_path: str,
+    access_token: str = "",
+    token_manager: GoogleTokenManager | None = None,
+):
     containers_url = f"{GTM_API_BASE}/{account_path}/containers"
-    container_ids = []
+    containers_data = _get_with_refresh(
+        containers_url,
+        "containers list for triggers",
+        access_token=access_token,
+        token_manager=token_manager,
+    )
 
-    while True:
-        try:
-            containers_resp = requests.get(containers_url, headers=_headers(access_token))
-        except requests.RequestException as e:
-            print(f"[GTM] Request error (containers list for triggers): {e}")
-            raise
-
-        containers_data = _handle_response(containers_resp, "containers list for triggers")
-        if containers_data is None:
-            continue
-
-        for c in containers_data.get("container", []):
-            container_ids.append(c["containerId"])
-        break
+    container_ids = [c["containerId"] for c in containers_data.get("container", [])]
 
     for cid in container_ids:
-        triggers_url = f"{GTM_API_BASE}/{account_path}/containers/{cid}/triggers"
-        while True:
-            try:
-                trig_resp = requests.get(triggers_url, headers=_headers(access_token))
-            except requests.RequestException as e:
-                print(f"[GTM] Request error (triggers container {cid}): {e}")
-                raise
+        workspaces_url = f"{GTM_API_BASE}/{account_path}/containers/{cid}/workspaces"
+        ws_data = _get_with_refresh(
+            workspaces_url,
+            f"workspaces container {cid}",
+            access_token=access_token,
+            token_manager=token_manager,
+        )
+        workspaces = [w["workspaceId"] for w in ws_data.get("workspace", [])]
+        workspace_paths = (
+            [
+                f"{GTM_API_BASE}/{account_path}/containers/{cid}/workspaces/{wid}/triggers"
+                for wid in workspaces
+            ]
+            if workspaces
+            else [f"{GTM_API_BASE}/{account_path}/containers/{cid}/triggers"]
+        )
 
-            trig_data = _handle_response(trig_resp, f"triggers container {cid}")
-            if trig_data is None:
-                continue
+        for triggers_url in workspace_paths:
+            trig_data = _get_with_refresh(
+                triggers_url,
+                f"triggers container {cid}",
+                access_token=access_token,
+                token_manager=token_manager,
+            )
 
             for trigger in trig_data.get("trigger", []):
                 yield {
@@ -169,15 +211,18 @@ def get_triggers(account_path: str, access_token: str):
                     "name": trigger.get("name"),
                     "filter_json": json.dumps(trigger.get("filter", [])),
                 }
-            break
 
 
 @dlt.source
-def gtm_source(account_path: str, access_token: str):
+def gtm_source(
+    account_path: str,
+    access_token: str = "",
+    token_manager: GoogleTokenManager | None = None,
+):
     return [
-        get_containers(account_path, access_token),
-        get_tags(account_path, access_token),
-        get_triggers(account_path, access_token),
+        get_containers(account_path, access_token=access_token, token_manager=token_manager),
+        get_tags(account_path, access_token=access_token, token_manager=token_manager),
+        get_triggers(account_path, access_token=access_token, token_manager=token_manager),
     ]
 
 
@@ -197,34 +242,50 @@ if __name__ == "__main__":
 
     if not os.path.exists(client_file):
         print(f"[GTM] Client file not found: {client_file}")
-        exit(1)
+        sys.exit(1)
 
     client = client_config.load_client(args.client)
 
     if not client.get("active", True):
         print(f"[GTM] Client {args.client} is not active. Skipping.")
-        exit(0)
+        sys.exit(0)
 
     errors = client_config.validate_client(client)
     if errors:
         for error in errors:
             print(f"[GTM] {error}")
-        exit(1)
+        sys.exit(1)
 
     connector = client["connectors"].get("gtm", {})
     if not connector.get("enabled"):
         print(f"[GTM] GTM connector not enabled for client {args.client}. Skipping.")
-        exit(0)
-
-    missing = client_config.missing_envs("gtm", connector)
-    if missing:
-        for env_name in missing:
-            print(f"[GTM] Environment variable {env_name} is not set for client {args.client}.")
-        exit(1)
+        sys.exit(0)
 
     account_path = connector["account_path"]
-    token_env = connector["token_env"]
-    access_token = os.environ[token_env]
+    if account_path and not account_path.startswith("accounts/"):
+        account_path = f"accounts/{account_path}"
+
+    # Resolve credentials: OAuth TokenManager preferred over static token
+    oauth_creds = resolve_google_credentials(client_name=args.client, service="gtm")
+    token_manager: GoogleTokenManager | None = None
+    access_token = ""
+
+    if oauth_creds:
+        token_manager = GoogleTokenManager(
+            client_id=oauth_creds["client_id"],
+            client_secret=oauth_creds["client_secret"],
+            refresh_token=oauth_creds["refresh_token"],
+        )
+    else:
+        token_env = connector.get("token_env")
+        if token_env and token_env in os.environ and os.environ[token_env].strip():
+            access_token = os.environ[token_env].strip()
+        else:
+            print(
+                f"[GTM] Missing GTM credentials for client {args.client}. "
+                f"Run 'make auth-google CLIENT={args.client}' or set {token_env} in .env."
+            )
+            sys.exit(1)
 
     print(f"[GTM] Extracting data for client '{args.client}' (path {account_path})...")
 
@@ -233,5 +294,7 @@ if __name__ == "__main__":
         destination="postgres",
         dataset_name=client_config.raw_dataset(args.client, "gtm"),
     )
-    info = pipeline.run(gtm_source(account_path, access_token))
+    info = pipeline.run(
+        gtm_source(account_path, access_token=access_token, token_manager=token_manager)
+    )
     print(f"[GTM] Done: {info}")

@@ -1,11 +1,13 @@
 import argparse
 import os
+import sys
 import time
 
 import dlt
 from dlt.sources.helpers import requests
 
 from agency_analytics import client_config
+from agency_analytics.google_auth import GoogleTokenManager, resolve_google_credentials
 
 GOOGLE_API_BASE = "https://googleads.googleapis.com/v25"
 MAX_RETRIES = 5
@@ -48,12 +50,6 @@ def _google_request(url, payload, headers, max_retries=MAX_RETRIES):
             raise Exception("[GOOGLE] Token expired. Renew OAuth token and redeploy.")
 
         if code == 403:
-            details = (
-                error.get("details", [{}])[0].get("errors", [{}])[0] if error.get("details") else {}
-            )
-            reason = details.get("reason", "")
-            if "developer-token" in reason.lower():
-                raise Exception("[GOOGLE] Invalid developer token. Check .env.")
             raise Exception(f"[GOOGLE] Access denied: {msg}")
 
         raise Exception(f"[GOOGLE] API error {code}: {msg}")
@@ -63,21 +59,32 @@ def _google_request(url, payload, headers, max_retries=MAX_RETRIES):
 
 def _google_search(
     customer_id: str,
-    developer_token: str,
-    access_token: str,
-    query: str,
+    access_token: str = "",
+    query: str = "",
     page_size: int = 10000,
+    token_manager: GoogleTokenManager | None = None,
 ):
     url = f"{GOOGLE_API_BASE}/customers/{customer_id}/googleAds:search"
     payload = {"query": query, "pageSize": page_size}
+
+    token = token_manager.get_token() if token_manager is not None else access_token
     headers = {
-        "Authorization": f"Bearer {access_token}",
-        "developer-token": developer_token,
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
 
+    refreshed_on_401 = False
     while True:
-        data = _google_request(url, payload, headers)
+        try:
+            data = _google_request(url, payload, headers)
+        except Exception as exc:
+            if "Token expired" in str(exc) and token_manager is not None and not refreshed_on_401:
+                refreshed_on_401 = True
+                token_manager._access_token = None
+                headers["Authorization"] = f"Bearer {token_manager.get_token()}"
+                continue
+            raise
+
         for row in data.get("results", []):
             yield row
 
@@ -88,7 +95,11 @@ def _google_search(
 
 
 @dlt.resource(name="ads", write_disposition="replace")
-def get_ads(customer_id: str, developer_token: str, access_token: str):
+def get_ads(
+    customer_id: str,
+    access_token: str = "",
+    token_manager: GoogleTokenManager | None = None,
+):
     query = """
         SELECT
             ad_group_ad.ad.id,
@@ -109,49 +120,49 @@ def get_ads(customer_id: str, developer_token: str, access_token: str):
         ORDER BY segments.date DESC
     """
 
-    for row in _google_search(customer_id, developer_token, access_token, query):
+    for row in _google_search(
+        customer_id, access_token=access_token, query=query, token_manager=token_manager
+    ):
         ad = row.get("adGroupAd", {}).get("ad", {})
         ad_group = row.get("adGroup", {})
         campaign = row.get("campaign", {})
         metrics = row.get("metrics", {})
         segments = row.get("segments", {})
-        ad_name = ad.get("name")
-        if isinstance(ad_name, dict):
-            ad_name = ad_name.get("value")
+
+        cost = float(metrics.get("costMicros", 0)) / 1_000_000
+        avg_cpc = float(metrics.get("averageCpc", 0)) / 1_000_000
+        cost_per_conv = float(metrics.get("costPerConversion", 0)) / 1_000_000
 
         yield {
             "ad_id": ad.get("id"),
+            "ad_name": ad.get("name"),
+            "ad_status": row.get("adGroupAd", {}).get("status"),
             "ad_group_id": ad_group.get("id"),
             "campaign_id": campaign.get("id"),
-            "ad_name": ad_name,
-            "status": row.get("adGroupAd", {}).get("status"),
-            "spend_usd": float(metrics.get("costMicros", 0) or 0) / 1_000_000,
-            "impressions": int(metrics.get("impressions", 0) or 0),
-            "clicks": int(metrics.get("clicks", 0) or 0),
-            "ctr": float(metrics.get("ctr", 0) or 0),
-            "average_cpc": (
-                float(metrics["averageCpc"]) / 1_000_000 if metrics.get("averageCpc") else 0.0
-            ),
-            "conversions": float(metrics.get("conversions", 0) or 0),
-            "cost_per_conversion": (
-                float(metrics["costPerConversion"]) / 1_000_000
-                if metrics.get("costPerConversion")
-                else 0.0
-            ),
+            "spend": round(cost, 2),
+            "impressions": int(metrics.get("impressions", 0)),
+            "clicks": int(metrics.get("clicks", 0)),
+            "ctr": float(metrics.get("ctr", 0.0)),
+            "cpc": round(avg_cpc, 2),
+            "conversions": float(metrics.get("conversions", 0.0)),
+            "cost_per_conversion": round(cost_per_conv, 2),
             "date": segments.get("date"),
         }
 
 
 @dlt.resource(name="campaigns", write_disposition="replace")
-def get_campaigns(customer_id: str, developer_token: str, access_token: str):
+def get_campaigns(
+    customer_id: str,
+    access_token: str = "",
+    token_manager: GoogleTokenManager | None = None,
+):
     query = """
         SELECT
             campaign.id,
             campaign.name,
             campaign.status,
             campaign.advertising_channel_type,
-            campaign.budget.amount_micros,
-            campaign.budget.type,
+            campaign_budget.amount_micros,
             campaign.start_date,
             campaign.end_date,
             metrics.cost_micros,
@@ -166,32 +177,32 @@ def get_campaigns(customer_id: str, developer_token: str, access_token: str):
         ORDER BY campaign.id
     """
 
-    for row in _google_search(customer_id, developer_token, access_token, query):
+    for row in _google_search(
+        customer_id, access_token=access_token, query=query, token_manager=token_manager
+    ):
         campaign = row.get("campaign", {})
         metrics = row.get("metrics", {})
         budget = campaign.get("budget", {})
         budget_amount = budget.get("amountMicros")
 
+        daily_budget = float(budget_amount) / 1_000_000 if budget_amount is not None else None
+        cost = float(metrics.get("costMicros", 0)) / 1_000_000
+        avg_cpc = float(metrics.get("averageCpc", 0)) / 1_000_000
+        cost_per_conv = float(metrics.get("costPerConversion", 0)) / 1_000_000
+
         yield {
             "campaign_id": campaign.get("id"),
             "campaign_name": campaign.get("name"),
             "status": campaign.get("status"),
-            "advertising_channel_type": campaign.get("advertisingChannelType"),
-            "budget": float(budget_amount) / 1_000_000 if budget_amount else None,
-            "budget_type": budget.get("type"),
-            "spend_usd": float(metrics.get("costMicros", 0) or 0) / 1_000_000,
-            "impressions": int(metrics.get("impressions", 0) or 0),
-            "clicks": int(metrics.get("clicks", 0) or 0),
-            "ctr": float(metrics.get("ctr", 0) or 0),
-            "average_cpc": (
-                float(metrics["averageCpc"]) / 1_000_000 if metrics.get("averageCpc") else 0.0
-            ),
-            "conversions": float(metrics.get("conversions", 0) or 0),
-            "cost_per_conversion": (
-                float(metrics["costPerConversion"]) / 1_000_000
-                if metrics.get("costPerConversion")
-                else 0.0
-            ),
+            "channel_type": campaign.get("advertisingChannelType"),
+            "daily_budget": round(daily_budget, 2) if daily_budget is not None else None,
+            "spend": round(cost, 2),
+            "impressions": int(metrics.get("impressions", 0)),
+            "clicks": int(metrics.get("clicks", 0)),
+            "ctr": float(metrics.get("ctr", 0.0)),
+            "cpc": round(avg_cpc, 2),
+            "conversions": float(metrics.get("conversions", 0.0)),
+            "cost_per_conversion": round(cost_per_conv, 2),
             "start_date": campaign.get("startDate"),
             "end_date": campaign.get("endDate"),
             "date": campaign.get("startDate"),
@@ -199,10 +210,14 @@ def get_campaigns(customer_id: str, developer_token: str, access_token: str):
 
 
 @dlt.source
-def google_ads_source(customer_id: str, developer_token: str, access_token: str):
+def google_ads_source(
+    customer_id: str,
+    access_token: str = "",
+    token_manager: GoogleTokenManager | None = None,
+):
     return [
-        get_ads(customer_id, developer_token, access_token),
-        get_campaigns(customer_id, developer_token, access_token),
+        get_ads(customer_id, access_token=access_token, token_manager=token_manager),
+        get_campaigns(customer_id, access_token=access_token, token_manager=token_manager),
     ]
 
 
@@ -222,35 +237,49 @@ def main():
 
     if not os.path.exists(client_file):
         print(f"[GOOGLE] Client file not found: {client_file}")
-        exit(1)
+        sys.exit(1)
 
     client = client_config.load_client(args.client)
 
     if not client.get("active", True):
         print(f"[GOOGLE] Client {args.client} is not active. Skipping.")
-        exit(0)
+        sys.exit(0)
 
     errors = client_config.validate_client(client)
     if errors:
         for error in errors:
             print(f"[GOOGLE] {error}")
-        exit(1)
+        sys.exit(1)
 
     connector = client.get("connectors", {}).get("google", {})
     if not connector.get("enabled"):
         print(f"[GOOGLE] Google Ads connector not enabled for client {args.client}. Skipping.")
-        exit(0)
-
-    missing = client_config.missing_envs("google", connector)
-    if missing:
-        for env_name in missing:
-            print(f"[GOOGLE] Environment variable {env_name} is not set for client {args.client}.")
-        exit(1)
+        sys.exit(0)
 
     customer_id = connector["customer_id"]
-    token_env = connector["token_env"]
-    developer_token = os.environ["GOOGLE_ADS_DEVELOPER_TOKEN"]
-    access_token = os.environ[token_env]
+
+    # Resolve credentials: OAuth TokenManager with refresh token preferred
+    oauth_creds = resolve_google_credentials(client_name=args.client, service="ads")
+    token_manager: GoogleTokenManager | None = None
+    access_token = ""
+
+    if oauth_creds:
+        token_manager = GoogleTokenManager(
+            client_id=oauth_creds["client_id"],
+            client_secret=oauth_creds["client_secret"],
+            refresh_token=oauth_creds["refresh_token"],
+        )
+    else:
+        # Fallback to direct token_env in client YAML
+        token_env = connector.get("token_env")
+        if token_env and token_env in os.environ and os.environ[token_env].strip():
+            access_token = os.environ[token_env].strip()
+        else:
+            print(
+                f"[GOOGLE] Missing Google Ads credentials for client {args.client}. "
+                f"Run 'make auth-google CLIENT={args.client}' or set {token_env} in .env."
+            )
+            sys.exit(1)
 
     print(f"[GOOGLE] Extracting data for client '{args.client}' (customer {customer_id})...")
 
@@ -259,7 +288,9 @@ def main():
         destination="postgres",
         dataset_name=client_config.raw_dataset(args.client, "google"),
     )
-    info = pipeline.run(google_ads_source(customer_id, developer_token, access_token))
+    info = pipeline.run(
+        google_ads_source(customer_id, access_token=access_token, token_manager=token_manager)
+    )
     print(f"[GOOGLE] Done: {info}")
 
 

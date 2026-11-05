@@ -11,6 +11,7 @@ import dlt
 from dlt.sources.helpers import requests
 
 from agency_analytics import client_config
+from agency_analytics.google_auth import GoogleTokenManager, resolve_google_credentials
 
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 YOUTUBE_ANALYTICS_BASE = "https://youtubeanalytics.googleapis.com/v2/reports"
@@ -43,15 +44,8 @@ def _parse_iso_duration(duration: str) -> int:
     return hours * 3600 + minutes * 60 + seconds
 
 
-class _TokenManager:
+class _TokenManager(GoogleTokenManager):
     """Cached OAuth access token obtained from a refresh token (stdlib urllib/requests only)."""
-
-    def __init__(self, client_id: str, client_secret: str, refresh_token: str):
-        self._client_id = client_id
-        self._client_secret = client_secret
-        self._refresh_token = refresh_token
-        self._access_token: str | None = None
-        self._expires_at = 0.0
 
     def get_token(self) -> str:
         if self._access_token and time.time() < self._expires_at:
@@ -838,8 +832,8 @@ if __name__ == "__main__":
         exit(0)
 
     channel_id = connector["channel_id"]
-    token_env = connector["token_env"]
-    api_key = os.environ.get(token_env, "")
+    token_env = connector.get("token_env", f"YOUTUBE_API_KEY_{args.client.upper()}")
+    api_key = os.environ.get(token_env, "") or os.environ.get("YOUTUBE_API_KEY", "")
     if not api_key:
         print(
             f"[YOUTUBE] Environment variable {token_env} is not set. "
@@ -848,21 +842,34 @@ if __name__ == "__main__":
         exit(0)
 
     oauth_config = None
-    oauth_client_id = connector.get("oauth_client_id_env")
-    oauth_client_secret = connector.get("oauth_client_secret_env")
-    oauth_refresh_token = connector.get("oauth_refresh_token_env")
-    if oauth_client_id and oauth_client_secret and oauth_refresh_token:
+    resolved = resolve_google_credentials(client_name=args.client, service="youtube")
+    if (
+        resolved
+        and resolved.get("client_id")
+        and resolved.get("client_secret")
+        and resolved.get("refresh_token")
+    ):
         oauth_config = {
-            "client_id": os.environ.get(oauth_client_id, ""),
-            "client_secret": os.environ.get(oauth_client_secret, ""),
-            "refresh_token": os.environ.get(oauth_refresh_token, ""),
+            "client_id": resolved["client_id"],
+            "client_secret": resolved["client_secret"],
+            "refresh_token": resolved["refresh_token"],
         }
-        if not all(oauth_config.values()):
-            print(
-                "[YOUTUBE] OAuth env keys configured but missing values. "
-                "Skipping analytics and captions resources."
-            )
-            oauth_config = None
+    else:
+        oauth_client_id = connector.get("oauth_client_id_env")
+        oauth_client_secret = connector.get("oauth_client_secret_env")
+        oauth_refresh_token = connector.get("oauth_refresh_token_env")
+        if oauth_client_id and oauth_client_secret and oauth_refresh_token:
+            oauth_config = {
+                "client_id": os.environ.get(oauth_client_id, ""),
+                "client_secret": os.environ.get(oauth_client_secret, ""),
+                "refresh_token": os.environ.get(oauth_refresh_token, ""),
+            }
+            if not all(oauth_config.values()):
+                print(
+                    "[YOUTUBE] OAuth env keys configured but missing values. "
+                    "Skipping analytics and captions resources."
+                )
+                oauth_config = None
     captions_enabled = bool(connector.get("captions_enabled", False))
     region_code = str(connector.get("region_code", DEFAULT_REGION_CODE))
     analytics_start_date = str(connector.get("analytics_start_date", DEFAULT_ANALYTICS_START_DATE))
