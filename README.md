@@ -286,7 +286,7 @@ See [.env.example](.env.example) for the full list of environment variables.
 |---|---|
 | **Database** | `POSTGRES_PASSWORD`, `DESTINATION__POSTGRES__CREDENTIALS__*` |
 | **Meta Ads** | `META_ACCESS_TOKEN_{CLIENT}` |
-| **Google Ads** | `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_ACCESS_TOKEN_{CLIENT}` |
+| **Google Suite (Ads, GA4, GTM, YouTube)** | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN` (or per-client `_CLIENT`) |
 | **Facebook** | `FACEBOOK_ACCESS_TOKEN_{CLIENT}` |
 | **Instagram** | `INSTAGRAM_ACCESS_TOKEN_{CLIENT}` |
 | **Pipeline** | `CLIENTS_DIR`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
@@ -318,6 +318,14 @@ All tests are mock-based - no live API calls. Each connector has tests for succe
 make auth-meta
 # Or for a specific client:
 make auth-meta CLIENT=acme
+
+# Interactive Google OAuth Renewal Wizard (GA4, GTM, Google Ads, YouTube)
+# Generates durable Refresh Tokens and configures global agency or per-client credentials
+make auth-google
+# Or for a specific client:
+make auth-google CLIENT=acme
+# Or restrict to specific services (default: all):
+make auth-google SERVICES=ga4,gtm
 ```
 
 ---
