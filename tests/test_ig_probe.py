@@ -13,8 +13,10 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 import yaml
 
 import agency_analytics.ig_probe as ig_probe
@@ -556,3 +558,111 @@ def test_main_writes_output_file(tmp_path, monkeypatch):
     payload = json.loads(out_file.read_text())
     assert payload["status"] == "ok"
     assert payload["read_only"] is True
+
+
+def test_http_get_json_branches():
+    from agency_analytics.ig_probe import ProbeTransportError, _live_fetch
+
+    # Success 200
+    mock_resp_200 = MagicMock()
+    mock_resp_200.status_code = 200
+    mock_resp_200.json.return_value = {"id": "123"}
+    with patch("requests.get", return_value=mock_resp_200):
+        data = _live_fetch("http://test.url", {})
+        assert data == {"id": "123"}
+
+    # 200 with bad JSON
+    mock_resp_bad = MagicMock()
+    mock_resp_bad.status_code = 200
+    mock_resp_bad.json.side_effect = ValueError("Invalid json")
+    with patch("requests.get", return_value=mock_resp_bad):
+        with pytest.raises(ProbeTransportError, match="invalid JSON body"):
+            _live_fetch("http://test.url", {})
+
+    # 200 with non-dict
+    mock_resp_list = MagicMock()
+    mock_resp_list.status_code = 200
+    mock_resp_list.json.return_value = ["not", "a", "dict"]
+    with patch("requests.get", return_value=mock_resp_list):
+        with pytest.raises(ProbeTransportError, match="unexpected non-object JSON body"):
+            _live_fetch("http://test.url", {})
+
+    # Error payload 400 with error dict
+    mock_resp_err = MagicMock()
+    mock_resp_err.status_code = 400
+    mock_resp_err.json.return_value = {"error": {"message": "Bad request", "code": 100}}
+    with patch("requests.get", return_value=mock_resp_err):
+        data = _live_fetch("http://test.url", {})
+        assert data["error"]["code"] == 100
+
+    # 500 retry and fail
+    mock_resp_500 = MagicMock()
+    mock_resp_500.status_code = 500
+    mock_resp_500.json.side_effect = ValueError()
+    with patch("requests.get", return_value=mock_resp_500):
+        with patch("time.sleep"):
+            with pytest.raises(ProbeTransportError, match="HTTP 500"):
+                _live_fetch("http://test.url", {})
+
+    # RequestException retry and fail
+    with patch("requests.get", side_effect=requests.RequestException("Conn error")):
+        with patch("time.sleep"):
+            with pytest.raises(ProbeTransportError, match="network error"):
+                _live_fetch("http://test.url", {})
+
+
+def test_resolve_clients_dir_env(monkeypatch):
+    from agency_analytics.ig_probe import _resolve_clients_dir
+
+    monkeypatch.setenv("CLIENTS_DIR", "/custom/clients/path")
+    assert _resolve_clients_dir(None) == "/custom/clients/path"
+
+
+def test_load_client_errors(tmp_path):
+    from agency_analytics.ig_probe import ProbeCannotRunError, _load_client
+
+    # File not found
+    with pytest.raises(ProbeCannotRunError, match="client file not found"):
+        _load_client("nonexistent", str(tmp_path))
+
+    # Inactive
+    cfile = tmp_path / "c1.yml"
+    cfile.write_text("active: false\n")
+    with pytest.raises(ProbeCannotRunError, match="is not active"):
+        _load_client("c1", str(tmp_path))
+
+    # Connector not enabled
+    cfile.write_text("active: true\nconnectors:\n  instagram:\n    enabled: false\n")
+    with pytest.raises(ProbeCannotRunError, match="not enabled"):
+        _load_client("c1", str(tmp_path))
+
+    # Missing business_id
+    cfile.write_text("active: true\nconnectors:\n  instagram:\n    enabled: true\n")
+    with pytest.raises(ProbeCannotRunError, match="instagram_business_id missing"):
+        _load_client("c1", str(tmp_path))
+
+    # Missing token_env
+    cfile.write_text(
+        "active: true\nconnectors:\n  instagram:\n    enabled: true\n    instagram_business_id: '123'\n"
+    )
+    with pytest.raises(ProbeCannotRunError, match="instagram token_env missing"):
+        _load_client("c1", str(tmp_path))
+
+
+def test_main_probe_transport_error(tmp_path, monkeypatch, capsys):
+    from agency_analytics.ig_probe import ProbeTransportError
+
+    _write_client_yaml(tmp_path)
+    monkeypatch.setenv("IG_TOKEN_TEST", "tok")
+    with patch(
+        "agency_analytics.ig_probe._live_fetch",
+        side_effect=ProbeTransportError(500, "Transport drop"),
+    ):
+        code = ig_probe.main(
+            ["--client", "test_client", "--clients-dir", str(tmp_path), "--read-only"]
+        )
+        assert code == 4
+        lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+        payload = json.loads(lines[0])
+        assert payload["status"] == "error"
+        assert payload["error"]["kind"] == "transport"
