@@ -329,3 +329,57 @@ def missing_envs(
     names = [section[key] for key in contract.get("env_keys", []) if section.get(key)]
     names += contract.get("env_globals", [])
     return [name for name in names if not env.get(name)]
+
+
+def setup_connector_run(
+    connector_name: str,
+    args: Any,
+    check_missing_envs: bool = True,
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """Validate client configuration and environment readiness for a connector run.
+
+    Loads the client configuration, verifies active status, validates schemas,
+    checks that the connector is enabled, and optionally verifies that required
+    environment variables are populated. Exits cleanly with status 0 or 1 on
+    validation error.
+    """
+    prefix = f"[{connector_name.upper()}]"
+    file_path = client_file_path(args.client)
+    if not os.path.exists(file_path):
+        print(f"{prefix} Client file not found: {file_path}")
+        exit(1)
+
+    client = load_client(args.client)
+    if not client.get("active", True):
+        print(f"{prefix} Client {args.client} is not active. Skipping.")
+        exit(0)
+
+    errors = validate_client(client)
+    if errors:
+        for error in errors:
+            print(f"{prefix} {error}")
+        exit(1)
+
+    connector = client.get("connectors", {}).get(connector_name, {})
+    if not connector.get("enabled"):
+        print(
+            f"{prefix} {connector_name.capitalize()} connector not enabled for client"
+            f" {args.client}. Skipping."
+        )
+        exit(0)
+
+    if check_missing_envs:
+        missing = missing_envs(connector_name, connector)
+        if missing and connector_name in ("gtm", "google"):
+            from agency_analytics.google_auth import resolve_google_credentials
+
+            if resolve_google_credentials(client_name=args.client, service=connector_name):
+                missing = []
+        if missing:
+            for env_name in missing:
+                print(
+                    f"{prefix} Environment variable {env_name} is not set for client {args.client}."
+                )
+            exit(1)
+
+    return client, connector, file_path

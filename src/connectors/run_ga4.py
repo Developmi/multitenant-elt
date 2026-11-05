@@ -227,7 +227,7 @@ def ga4_source(property_id: str, client_email: str, private_key: str):
     ]
 
 
-if __name__ == "__main__":
+def main():
     from dotenv import load_dotenv
 
     try:
@@ -239,28 +239,7 @@ if __name__ == "__main__":
     parser.add_argument("--client", required=True, help="Client ID from clients/ YAML")
     args = parser.parse_args()
 
-    client_file = client_config.client_file_path(args.client)
-
-    if not os.path.exists(client_file):
-        print(f"[GA4] Client file not found: {client_file}")
-        exit(1)
-
-    client = client_config.load_client(args.client)
-
-    if not client.get("active", True):
-        print(f"[GA4] Client {args.client} is not active. Skipping.")
-        exit(0)
-
-    errors = client_config.validate_client(client)
-    if errors:
-        for error in errors:
-            print(f"[GA4] {error}")
-        exit(1)
-
-    connector = client["connectors"].get("ga4", {})
-    if not connector.get("enabled"):
-        print(f"[GA4] GA4 connector not enabled for client {args.client}. Skipping.")
-        exit(0)
+    _, connector, _ = client_config.setup_connector_run("ga4", args)
 
     property_id = connector["property_id"]
     service_account_raw = connector["service_account"]
@@ -282,3 +261,7 @@ if __name__ == "__main__":
     )
     info = pipeline.run(ga4_source(property_id, client_email, private_key))
     print(f"[GA4] Done: {info}")
+
+
+if __name__ == "__main__":
+    main()

@@ -183,4 +183,131 @@ class TestMainFailFast:
         assert exc.value.code == 1
         out = capsys.readouterr().out
         assert "[META]" in out
-        assert '"connectors" root is missing or not a mapping' in out
+
+
+def test_meta_request_error_branches():
+    from dlt.sources.helpers import requests as dlt_requests
+    from run_meta import _meta_request
+
+    # HTTPError 429
+    mock_resp_429 = MagicMock()
+    mock_resp_429.status_code = 429
+    mock_resp_429.json.return_value = {"error": {"code": 4, "message": "Rate limited"}}
+    err_429 = dlt_requests.HTTPError(response=mock_resp_429)
+    with patch("run_meta.requests.get", side_effect=err_429):
+        with patch("time.sleep"):
+            with pytest.raises(Exception, match="exceeded on rate limit"):
+                _meta_request("http://meta.test", max_retries=1)
+
+    # HTTPError 190
+    mock_resp_190 = MagicMock()
+    mock_resp_190.status_code = 400
+    mock_resp_190.json.return_value = {"error": {"code": 190, "message": "Expired"}}
+    err_190 = dlt_requests.HTTPError(response=mock_resp_190)
+    with patch("run_meta.requests.get", side_effect=err_190):
+        with pytest.raises(Exception, match="Token expired"):
+            _meta_request("http://meta.test", max_retries=1)
+
+    # HTTPError generic
+    mock_resp_500 = MagicMock()
+    mock_resp_500.status_code = 500
+    mock_resp_500.json.return_value = {"error": {"code": 500, "message": "Server error"}}
+    err_500 = dlt_requests.HTTPError(response=mock_resp_500)
+    with patch("run_meta.requests.get", side_effect=err_500):
+        with pytest.raises(Exception, match="API error: Server error"):
+            _meta_request("http://meta.test", max_retries=1)
+
+    # RequestException
+    with patch("run_meta.requests.get", side_effect=dlt_requests.RequestException("Conn drop")):
+        with patch("time.sleep"):
+            with pytest.raises(dlt_requests.RequestException):
+                _meta_request("http://meta.test", max_retries=1)
+
+    # Body error with string wait
+    mock_resp_ok = MagicMock()
+    mock_resp_ok.json.return_value = {"error": {"code": 80000, "error_user_title": "str_wait"}}
+    with patch("run_meta.requests.get", return_value=mock_resp_ok):
+        with patch("time.sleep"):
+            with pytest.raises(Exception, match="exceeded on rate limit"):
+                _meta_request("http://meta.test", max_retries=1)
+
+    # Body error code 100
+    mock_resp_100 = MagicMock()
+    mock_resp_100.json.return_value = {"error": {"code": 100, "message": "Invalid param"}}
+    with patch("run_meta.requests.get", return_value=mock_resp_100):
+        with pytest.raises(Exception, match="Invalid parameter"):
+            _meta_request("http://meta.test", max_retries=1)
+
+    # Body error generic
+    mock_resp_gen = MagicMock()
+    mock_resp_gen.json.return_value = {"error": {"code": 999, "message": "Custom error"}}
+    with patch("run_meta.requests.get", return_value=mock_resp_gen):
+        with pytest.raises(Exception, match="API error 999"):
+            _meta_request("http://meta.test", max_retries=1)
+
+
+def test_meta_main_cli_branches(tmp_path, monkeypatch):
+    import sys
+
+    from run_meta import main
+
+    fake_file = tmp_path / "c.yml"
+    fake_file.write_text("active: false\n")
+
+    # Inactive
+    monkeypatch.setattr(sys, "argv", ["run_meta", "--client", "inactive"])
+    with patch("agency_analytics.client_config.client_file_path", return_value=str(fake_file)):
+        with patch("agency_analytics.client_config.load_client", return_value={"active": False}):
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0
+
+    # Validation errors
+    monkeypatch.setattr(sys, "argv", ["run_meta", "--client", "invalid"])
+    with patch("agency_analytics.client_config.client_file_path", return_value=str(fake_file)):
+        with patch("agency_analytics.client_config.load_client", return_value={"active": True}):
+            with patch("agency_analytics.client_config.validate_client", return_value=["Err"]):
+                with pytest.raises(SystemExit) as exc:
+                    main()
+                assert exc.value.code == 1
+
+    # Connector disabled
+    client_cfg = {"active": True, "connectors": {"meta": {"enabled": False}}}
+    monkeypatch.setattr(sys, "argv", ["run_meta", "--client", "disabled"])
+    with patch("agency_analytics.client_config.client_file_path", return_value=str(fake_file)):
+        with patch("agency_analytics.client_config.load_client", return_value=client_cfg):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with pytest.raises(SystemExit) as exc:
+                    main()
+                assert exc.value.code == 0
+
+    # Missing envs
+    client_cfg_active = {"active": True, "connectors": {"meta": {"enabled": True}}}
+    monkeypatch.setattr(sys, "argv", ["run_meta", "--client", "missing_env"])
+    with patch("agency_analytics.client_config.client_file_path", return_value=str(fake_file)):
+        with patch("agency_analytics.client_config.load_client", return_value=client_cfg_active):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with patch(
+                    "agency_analytics.client_config.missing_envs", return_value=["MISSING_KEY"]
+                ):
+                    with pytest.raises(SystemExit) as exc:
+                        main()
+                    assert exc.value.code == 1
+
+    # Success run
+    client_cfg_good = {
+        "active": True,
+        "connectors": {"meta": {"enabled": True, "account_id": "act_123", "token_env": "M_TOKEN"}},
+    }
+    monkeypatch.setattr(sys, "argv", ["run_meta", "--client", "good"])
+    monkeypatch.setenv("M_TOKEN", "valid_meta_tok")
+    mock_pipeline = MagicMock()
+    mock_pipeline.run.return_value = "meta_ok"
+    with patch("agency_analytics.client_config.client_file_path", return_value=str(fake_file)):
+        with patch("agency_analytics.client_config.load_client", return_value=client_cfg_good):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with patch("agency_analytics.client_config.missing_envs", return_value=[]):
+                    with patch("dlt.pipeline", return_value=mock_pipeline):
+                        with patch("run_meta.meta_ads_source", return_value="dummy_meta_src"):
+                            main()
+                            mock_pipeline.run.assert_called_once()

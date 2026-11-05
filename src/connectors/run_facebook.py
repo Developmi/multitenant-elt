@@ -495,7 +495,7 @@ def facebook_page_source(page_id: str, access_token: str, insights_days_back: in
     ]
 
 
-if __name__ == "__main__":
+def main():
     from dotenv import load_dotenv
 
     try:
@@ -507,36 +507,7 @@ if __name__ == "__main__":
     parser.add_argument("--client", required=True, help="Client ID from clients/ YAML")
     args = parser.parse_args()
 
-    client_file = client_config.client_file_path(args.client)
-
-    if not os.path.exists(client_file):
-        print(f"[FACEBOOK] Client file not found: {client_file}")
-        exit(1)
-
-    client = client_config.load_client(args.client)
-
-    if not client.get("active", True):
-        print(f"[FACEBOOK] Client {args.client} is not active. Skipping.")
-        exit(0)
-
-    errors = client_config.validate_client(client)
-    if errors:
-        for error in errors:
-            print(f"[FACEBOOK] {error}")
-        exit(1)
-
-    connector = client["connectors"].get("facebook", {})
-    if not connector.get("enabled"):
-        print(f"[FACEBOOK] Facebook connector not enabled for client {args.client}. Skipping.")
-        exit(0)
-
-    missing = client_config.missing_envs("facebook", connector)
-    if missing:
-        for env_name in missing:
-            print(
-                f"[FACEBOOK] Environment variable {env_name} is not set for client {args.client}."
-            )
-        exit(1)
+    _, connector, _ = client_config.setup_connector_run("facebook", args)
 
     page_id = connector["page_id"]
     token_env = connector["token_env"]
@@ -553,3 +524,7 @@ if __name__ == "__main__":
 
     info = pipeline.run(facebook_page_source(page_id, access_token, insights_days_back))
     print(f"[FACEBOOK] Done: {info}")
+
+
+if __name__ == "__main__":
+    main()

@@ -10,10 +10,10 @@ from __future__ import annotations
 import dataclasses
 import getpass
 import os
-import re
 import sys
 from pathlib import Path
 
+import dotenv
 import requests
 
 GRAPH_API_BASE = "https://graph.facebook.com/v25.0"
@@ -254,8 +254,7 @@ def list_page_accounts(
 def update_client_env(env_path: Path | str, client_id: str, page_token: str) -> bool:
     """Safely update FACEBOOK_ACCESS_TOKEN and INSTAGRAM_ACCESS_TOKEN in .env.
 
-    Preserves all existing comments, whitespace, and unmodified keys. If the
-    keys do not exist, appends them cleanly at the end of the file.
+    Preserves existing comments, whitespace, and unmodified keys.
 
     Args:
         env_path: Path to the target .env file.
@@ -267,48 +266,10 @@ def update_client_env(env_path: Path | str, client_id: str, page_token: str) -> 
     """
     path = Path(env_path)
     if not path.exists():
-        content = ""
-    else:
-        content = path.read_text(encoding="utf-8")
-
+        path.touch()
     prefix = client_id.upper()
-    fb_key = f"FACEBOOK_ACCESS_TOKEN_{prefix}"
-    ig_key = f"INSTAGRAM_ACCESS_TOKEN_{prefix}"
-
-    fb_pattern = rf"^{fb_key}=.*$"
-    ig_pattern = rf"^{ig_key}=.*$"
-
-    fb_found = bool(re.search(fb_pattern, content, flags=re.MULTILINE))
-    ig_found = bool(re.search(ig_pattern, content, flags=re.MULTILINE))
-
-    if fb_found:
-        content = re.sub(
-            fb_pattern,
-            f"{fb_key}={page_token}",
-            content,
-            flags=re.MULTILINE,
-        )
-    if ig_found:
-        content = re.sub(
-            ig_pattern,
-            f"{ig_key}={page_token}",
-            content,
-            flags=re.MULTILINE,
-        )
-
-    # Append any missing keys
-    to_append = []
-    if not fb_found:
-        to_append.append(f"{fb_key}={page_token}")
-    if not ig_found:
-        to_append.append(f"{ig_key}={page_token}")
-
-    if to_append:
-        if content and not content.endswith("\n"):
-            content += "\n"
-        content += "\n".join(to_append) + "\n"
-
-    path.write_text(content, encoding="utf-8")
+    dotenv.set_key(str(path), f"FACEBOOK_ACCESS_TOKEN_{prefix}", page_token, quote_mode="never")
+    dotenv.set_key(str(path), f"INSTAGRAM_ACCESS_TOKEN_{prefix}", page_token, quote_mode="never")
     return True
 
 

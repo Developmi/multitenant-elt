@@ -259,7 +259,7 @@ jinja-rendered from the same `var('client_id')` in sources.yml (M1), so every
 ```
 
 The pipeline runs dbt once per active client with only `client_id` in `--vars`
-(the model `--select` comes from the plan in `scripts/pipeline.sh`):
+(the model `--select` is dynamically determined by `src/agency_analytics/pipeline_plan.py`):
 
 ```bash
 dbt run --select '<plan models>' --vars '{"client_id": "acme"}' --profiles-dir .
@@ -267,31 +267,40 @@ dbt run --select '<plan models>' --vars '{"client_id": "acme"}' --profiles-dir .
 
 ## Orchestration: Nightly Pipeline
 
-The pipeline runs from the host via cron. Before any step, it validates container health.
+The pipeline runs from the host via cron or directly via `make pipeline`. The host wrapper (`scripts/pipeline.sh`) validates container health and delegates execution to the Python orchestrator (`multitenant-elt pipeline` / `pipeline_runner.py`) running inside the container.
 
 ### Execution Flow
 
 ```
-cron (02:00 AM)
+cron (02:00 AM) or 'make pipeline'
       │
       ▼
-scripts/pipeline.sh
+scripts/pipeline.sh (Host wrapper)
       │
-      ├── [1] Validate containers (postgres, pipeline_worker)
+      ├── [1] Validate containers (agency_postgres, agency_pipeline)
       │         │
       │         ├── OK  ──────────────────────────────────┐
       │         └── FAIL ──► Telegram alert ──► ABORT     │
       │                                                   │
       ▼                                                   │
-      ├── [2] For each active client in clients/*.yml     │◄──┘
-      │         │
-      │         ├── dlt: extract enabled domains
-      │         │         └── FAIL ──► Telegram alert ──► next client
-      │         │
-      │         └── dbt: run --vars '{client_id: ...}' via docker exec
-      │                   └── FAIL ──► Telegram alert ──► next client
+docker exec agency_pipeline multitenant-elt pipeline      │◄──┘
       │
-      └── [3] Telegram: execution summary (successes + failures)
+      ▼
+pipeline_runner.py (Python orchestrator)
+      │
+      ├── [2] Discover & filter active clients in clients/*.yml
+      │         │
+      │         ├── Compute dynamic plan (pipeline_plan.py)
+      │         │
+      │         ├── Record pipeline run start (public.pipeline_runs)
+      │         │
+      │         ├── Execute connectors in-process / subprocess per tenant
+      │         │     └── Record step status (public.pipeline_run_steps)
+      │         │
+      │         └── Run dbt per client with dynamic selection
+      │               └── Record dbt step status
+      │
+      └── [3] Telegram: execution summary (successes + failures) & DB finish update
 ```
 
 ### Container Health Check

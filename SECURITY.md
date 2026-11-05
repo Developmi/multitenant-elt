@@ -2,10 +2,23 @@
 
 ## Supported versions
 
-| Version | Supported |
-|---------|-----------|
-| 1.x     | ✅ Yes    |
-| < 1.0   | ❌ No     |
+| Version | Supported | Notes |
+|---------|-----------|-------|
+| 2.x     | ✅ Yes    | Active release line |
+| 1.x     | ⚠️ Maintenance | Critical security fixes only until 2026-12-31 |
+| < 1.0   | ❌ No     | Unsupported |
+
+## Known and Mitigated CVEs
+
+The project enforces proactive supply chain security with Trivy, Syft, and Cosign:
+
+| CVE / Identifier | Affected Component | Status | Mitigation Strategy |
+|---|---|:---:|---|
+| **CVE-2026-109518** | Debian 13.7 `apt` / `libapt-pkg7.0` | Mitigated | Runtime package upgrade in Dockerfile until upstream `python:3.12-slim` rebuilds. |
+| **CVE-2026-27464** | Metabase `< 0.57.13` | Mitigated | Image pinned by multi-arch OCI SHA256 digest to `v0.57.13`. |
+| **GHSA-6q48-6c7w-9gw2** | `certifi` | Mitigated | Upgraded to `>= 2026.10.23` in `uv.lock`. |
+| **CVE-2026-114145** | `gitpython` | Mitigated | Upgraded to `>= 3.2.1` in `uv.lock`. |
+| **CVE-2026-114613** | `msgpack` | Mitigated | Upgraded to `>= 1.2.4` in `uv.lock`. |
 
 ## Reporting a vulnerability
 

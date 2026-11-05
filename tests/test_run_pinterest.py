@@ -1,4 +1,5 @@
 import os
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
@@ -235,3 +236,133 @@ def test_connector_key_and_field():
     pi_cfg = template["connectors"]["pinterest"]
     assert "board_id" in pi_cfg
     assert "token_env" in pi_cfg
+
+
+def test_do_request_error_branches():
+    from dlt.sources.helpers import requests as dlt_requests
+    from run_pinterest import _do_request
+
+    # RequestException
+    with patch(
+        "run_pinterest.requests.get", side_effect=dlt_requests.RequestException("Conn drop")
+    ):
+        with patch("time.sleep"):
+            with pytest.raises(dlt_requests.RequestException):
+                _do_request("http://pi.test", {}, {}, "ctx", retries=1)
+
+    # 429 rate limit exceeded
+    mock_resp_429 = MagicMock()
+    mock_resp_429.status_code = 429
+    mock_resp_429.headers = {"Retry-After": "10"}
+    with patch("run_pinterest.requests.get", return_value=mock_resp_429):
+        with patch("time.sleep"):
+            with pytest.raises(Exception, match="Rate limit exceeded"):
+                _do_request("http://pi.test", {}, {}, "ctx", retries=1)
+
+    # status != 200 with json error
+    mock_resp_err = MagicMock()
+    mock_resp_err.status_code = 400
+    mock_resp_err.json.return_value = {"code": 400, "message": "Bad request"}
+    with patch("run_pinterest.requests.get", return_value=mock_resp_err):
+        with pytest.raises(Exception, match="API error 400"):
+            _do_request("http://pi.test", {}, {}, "ctx", retries=1)
+
+    # status != 200 without json error
+    mock_resp_err2 = MagicMock()
+    mock_resp_err2.status_code = 503
+    mock_resp_err2.reason = "Service Unavailable"
+    mock_resp_err2.json.side_effect = ValueError()
+    with patch("run_pinterest.requests.get", return_value=mock_resp_err2):
+        with pytest.raises(Exception, match="API error 503"):
+            _do_request("http://pi.test", {}, {}, "ctx", retries=1)
+
+    # JSON parse error on 200
+    mock_resp_bad = MagicMock()
+    mock_resp_bad.status_code = 200
+    mock_resp_bad.json.side_effect = ValueError("Corrupt body")
+    with patch("run_pinterest.requests.get", return_value=mock_resp_bad):
+        with pytest.raises(ValueError):
+            _do_request("http://pi.test", {}, {}, "ctx", retries=1)
+
+
+def test_get_board_insights_empty_boards():
+    from run_pinterest import get_board_insights
+
+    with patch("run_pinterest._list_board_ids", return_value=[]):
+        res = list(get_board_insights("tok"))
+        assert res == []
+
+
+def test_pinterest_main_cli(tmp_path, monkeypatch):
+    import runpy
+    import sys
+
+    # 1. Client file not found -> exit 1
+    monkeypatch.setattr(sys, "argv", ["run_pinterest", "--client", "missing"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(tmp_path / "absent.yml")
+    ):
+        with pytest.raises(SystemExit) as exc:
+            runpy.run_path("src/connectors/run_pinterest.py", run_name="__main__")
+        assert exc.value.code == 1
+
+    fake_file = tmp_path / "c.yml"
+    fake_file.write_text("active: false\n")
+
+    # 2. Inactive client -> exit 0
+    monkeypatch.setattr(sys, "argv", ["run_pinterest", "--client", "inactive"])
+    with patch("agency_analytics.client_config.client_file_path", return_value=str(fake_file)):
+        with patch("agency_analytics.client_config.load_client", return_value={"active": False}):
+            with pytest.raises(SystemExit) as exc:
+                runpy.run_path("src/connectors/run_pinterest.py", run_name="__main__")
+            assert exc.value.code == 0
+
+    # 3. Validation error -> exit 1
+    monkeypatch.setattr(sys, "argv", ["run_pinterest", "--client", "invalid"])
+    with patch("agency_analytics.client_config.client_file_path", return_value=str(fake_file)):
+        with patch("agency_analytics.client_config.load_client", return_value={"active": True}):
+            with patch("agency_analytics.client_config.validate_client", return_value=["Err"]):
+                with pytest.raises(SystemExit) as exc:
+                    runpy.run_path("src/connectors/run_pinterest.py", run_name="__main__")
+                assert exc.value.code == 1
+
+    # 4. Connector disabled -> exit 0
+    client_cfg = {"active": True, "connectors": {"pinterest": {"enabled": False}}}
+    monkeypatch.setattr(sys, "argv", ["run_pinterest", "--client", "disabled"])
+    with patch("agency_analytics.client_config.client_file_path", return_value=str(fake_file)):
+        with patch("agency_analytics.client_config.load_client", return_value=client_cfg):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with pytest.raises(SystemExit) as exc:
+                    runpy.run_path("src/connectors/run_pinterest.py", run_name="__main__")
+                assert exc.value.code == 0
+
+    # 5. Missing envs -> exit 1
+    client_cfg_active = {"active": True, "connectors": {"pinterest": {"enabled": True}}}
+    monkeypatch.setattr(sys, "argv", ["run_pinterest", "--client", "missing_env"])
+    with patch("agency_analytics.client_config.client_file_path", return_value=str(fake_file)):
+        with patch("agency_analytics.client_config.load_client", return_value=client_cfg_active):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with patch(
+                    "agency_analytics.client_config.missing_envs", return_value=["MISSING_KEY"]
+                ):
+                    with pytest.raises(SystemExit) as exc:
+                        runpy.run_path("src/connectors/run_pinterest.py", run_name="__main__")
+                    assert exc.value.code == 1
+
+    # 6. Success run
+    client_cfg_good = {
+        "active": True,
+        "connectors": {"pinterest": {"enabled": True, "token_env": "PI_TOKEN", "board_id": "b123"}},
+    }
+    monkeypatch.setattr(sys, "argv", ["run_pinterest", "--client", "good"])
+    monkeypatch.setenv("PI_TOKEN", "valid_pi_tok")
+    mock_pipeline = MagicMock()
+    mock_pipeline.run.return_value = "pi_ok"
+    with patch("agency_analytics.client_config.client_file_path", return_value=str(fake_file)):
+        with patch("agency_analytics.client_config.load_client", return_value=client_cfg_good):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with patch("agency_analytics.client_config.missing_envs", return_value=[]):
+                    with patch("dlt.pipeline", return_value=mock_pipeline):
+                        with patch("run_pinterest.pinterest_source", return_value="dummy_pi_src"):
+                            runpy.run_path("src/connectors/run_pinterest.py", run_name="__main__")
+                            mock_pipeline.run.assert_called_once()

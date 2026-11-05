@@ -1184,3 +1184,184 @@ def test_connector_insights_days_back():
     ig_cfg = template["connectors"]["instagram"]
     assert "insights_days_back" in ig_cfg
     assert isinstance(ig_cfg["insights_days_back"], int)
+
+
+def test_should_retry_and_do_request_branches():
+    from unittest.mock import MagicMock, patch
+
+    from dlt.sources.helpers import requests as dlt_requests
+    from run_instagram import _do_request, _InstagramAPIError, _should_retry
+
+    assert _should_retry({}) is False
+
+    # Wait as string -> 60
+    assert _should_retry({"error": {"code": 80000, "error_user_title": "str_wait"}}) == 60
+
+    # Wait normal
+    assert _should_retry({"error": {"code": 4, "error_subcode": 25}}) == 25
+
+    # Code 100
+    with pytest.raises(_InstagramAPIError, match="Invalid parameter"):
+        _should_retry({"error": {"code": 100, "message": "Bad param"}})
+
+    # Code 190
+    with pytest.raises(_InstagramAPIError, match="Token expired"):
+        _should_retry({"error": {"code": 190, "message": "Expired"}})
+
+    # Other code
+    with pytest.raises(_InstagramAPIError, match="API error 500"):
+        _should_retry({"error": {"code": 500, "message": "Internal"}})
+
+    # _do_request HTTP 429 rate limit exceeded
+    mock_resp_429 = MagicMock()
+    mock_resp_429.status_code = 429
+    mock_resp_429.json.return_value = {"error": {"code": 4, "message": "Rate limited"}}
+    err_429 = dlt_requests.HTTPError(response=mock_resp_429)
+    with patch("run_instagram.requests.get", side_effect=err_429):
+        with patch("run_instagram.time.sleep"):
+            with pytest.raises(_InstagramAPIError, match="Rate limit exceeded"):
+                _do_request("http://ig.test", {}, "ctx", retries=1)
+
+    # _do_request HTTP 100
+    mock_resp_100 = MagicMock()
+    mock_resp_100.status_code = 400
+    mock_resp_100.json.return_value = {"error": {"code": 100, "message": "Bad"}}
+    err_100 = dlt_requests.HTTPError(response=mock_resp_100)
+    with patch("run_instagram.requests.get", side_effect=err_100):
+        with pytest.raises(_InstagramAPIError, match="Invalid parameter"):
+            _do_request("http://ig.test", {}, "ctx", retries=1)
+
+    # _do_request HTTP 190
+    mock_resp_190 = MagicMock()
+    mock_resp_190.status_code = 400
+    mock_resp_190.json.return_value = {"error": {"code": 190, "message": "Expired"}}
+    err_190 = dlt_requests.HTTPError(response=mock_resp_190)
+    with patch("run_instagram.requests.get", side_effect=err_190):
+        with pytest.raises(_InstagramAPIError, match="Token expired"):
+            _do_request("http://ig.test", {}, "ctx", retries=1)
+
+    # _do_request HTTP generic error
+    mock_resp_500 = MagicMock()
+    mock_resp_500.status_code = 500
+    mock_resp_500.json.return_value = {"error": {"code": 500, "message": "Server err"}}
+    err_500 = dlt_requests.HTTPError(response=mock_resp_500)
+    with patch("run_instagram.requests.get", side_effect=err_500):
+        with pytest.raises(_InstagramAPIError, match="API error: Server err"):
+            _do_request("http://ig.test", {}, "ctx", retries=1)
+
+    # _do_request RequestException
+    with patch(
+        "run_instagram.requests.get", side_effect=dlt_requests.RequestException("Conn drop")
+    ):
+        with patch("run_instagram.time.sleep"):
+            with pytest.raises(dlt_requests.RequestException):
+                _do_request("http://ig.test", {}, "ctx", retries=1)
+
+    # _do_request retry exceeded
+    with patch(
+        "run_instagram.requests.get", return_value=MagicMock(json=lambda: {"error": {"code": 4}})
+    ):
+        with patch("run_instagram.time.sleep"):
+            with pytest.raises(Exception, match="Rate limit exceeded"):
+                _do_request("http://ig.test", {}, "ctx", retries=1)
+
+
+def test_instagram_main_cli(monkeypatch, tmp_path):
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    from run_instagram import main
+
+    # 1. Client file not found -> exit 1
+    monkeypatch.setattr(sys, "argv", ["run_instagram", "--client", "missing"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(tmp_path / "absent.yml")
+    ):
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 1
+
+    # 2. Inactive client -> exit 0
+    fake_client_file = tmp_path / "c.yml"
+    fake_client_file.write_text("active: false\n")
+    monkeypatch.setattr(sys, "argv", ["run_instagram", "--client", "inactive"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch("agency_analytics.client_config.load_client", return_value={"active": False}):
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0
+
+    # 3. Validation errors -> exit 1
+    monkeypatch.setattr(sys, "argv", ["run_instagram", "--client", "invalid"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch("agency_analytics.client_config.load_client", return_value={"active": True}):
+            with patch("agency_analytics.client_config.validate_client", return_value=["Err"]):
+                with pytest.raises(SystemExit) as exc:
+                    main()
+                assert exc.value.code == 1
+
+    # 4. Connector not enabled -> exit 0
+    monkeypatch.setattr(sys, "argv", ["run_instagram", "--client", "disabled"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch(
+            "agency_analytics.client_config.load_client",
+            return_value={"active": True, "connectors": {"instagram": {"enabled": False}}},
+        ):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with pytest.raises(SystemExit) as exc:
+                    main()
+                assert exc.value.code == 0
+
+    # 5. Missing envs -> exit 1
+    monkeypatch.setattr(sys, "argv", ["run_instagram", "--client", "missing_env"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch(
+            "agency_analytics.client_config.load_client",
+            return_value={"active": True, "connectors": {"instagram": {"enabled": True}}},
+        ):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with patch(
+                    "agency_analytics.client_config.missing_envs", return_value=["MISSING_VAR"]
+                ):
+                    with pytest.raises(SystemExit) as exc:
+                        main()
+                    assert exc.value.code == 1
+
+    # 6. Success run
+    monkeypatch.setattr(sys, "argv", ["run_instagram", "--client", "good"])
+    monkeypatch.setenv("IG_TOKEN", "valid_tok")
+    client_cfg = {
+        "active": True,
+        "connectors": {
+            "instagram": {
+                "enabled": True,
+                "instagram_business_id": "biz123",
+                "token_env": "IG_TOKEN",
+                "insights_days_back": 30,
+            }
+        },
+    }
+    mock_pipeline = MagicMock()
+    mock_pipeline.run.return_value = "ok"
+    mock_sql = MagicMock()
+    mock_pipeline.sql_client.return_value.__enter__.return_value = mock_sql
+
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch("agency_analytics.client_config.load_client", return_value=client_cfg):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with patch("agency_analytics.client_config.missing_envs", return_value=[]):
+                    with patch("dlt.pipeline", return_value=mock_pipeline):
+                        with patch("run_instagram.instagram_source", return_value="dummy_source"):
+                            with patch("run_instagram._archive_table"):
+                                main()
+                                mock_pipeline.run.assert_called_once()

@@ -2,7 +2,7 @@ import os
 import time
 from argparse import Namespace
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
@@ -723,3 +723,137 @@ def test_connector_key_and_field():
     assert "client_key_env" in tt_cfg
     assert "client_secret_env" in tt_cfg
     assert "refresh_token_env" in tt_cfg
+
+
+def test_refresh_access_token_branches():
+    from run_tiktok_organic import _refresh_access_token
+
+    # Success
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"data": {"access_token": "new_tok"}}
+    with patch("run_tiktok_organic.requests.post", return_value=mock_resp):
+        res = _refresh_access_token("ck", "cs", "rt")
+        assert res["data"]["access_token"] == "new_tok"
+
+    # Error
+    mock_resp_err = MagicMock()
+    mock_resp_err.json.return_value = {"error": "invalid_grant", "error_description": "Revoked"}
+    with patch("run_tiktok_organic.requests.post", return_value=mock_resp_err):
+        with pytest.raises(Exception, match="Token refresh failed"):
+            _refresh_access_token("ck", "cs", "rt")
+
+
+def test_check_error_branches():
+    from run_tiktok_organic import _check_error
+
+    assert _check_error({}, "ctx") is None
+    assert _check_error({"error": {}}, "ctx") is None
+    assert _check_error({"error": {"code": "access_token_expired"}}, "ctx") == 5
+
+    with pytest.raises(Exception, match="API error 500"):
+        _check_error({"error": {"code": 500, "message": "Fatal"}}, "ctx")
+
+
+def test_tiktok_organic_main_cli(monkeypatch, tmp_path):
+    import sys
+
+    from run_tiktok_organic import main
+
+    # 1. Client file not found -> exit 1
+    monkeypatch.setattr(sys, "argv", ["run_tiktok_organic", "--client", "missing"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(tmp_path / "absent.yml")
+    ):
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 1
+
+    # 2. Inactive client -> exit 0
+    fake_client_file = tmp_path / "c.yml"
+    fake_client_file.write_text("active: false\n")
+    monkeypatch.setattr(sys, "argv", ["run_tiktok_organic", "--client", "inactive"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch("agency_analytics.client_config.load_client", return_value={"active": False}):
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0
+
+    # 3. Validation errors -> exit 1
+    monkeypatch.setattr(sys, "argv", ["run_tiktok_organic", "--client", "invalid"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch("agency_analytics.client_config.load_client", return_value={"active": True}):
+            with patch("agency_analytics.client_config.validate_client", return_value=["Err"]):
+                with pytest.raises(SystemExit) as exc:
+                    main()
+                assert exc.value.code == 1
+
+    # 4. Connector not enabled -> exit 0
+    monkeypatch.setattr(sys, "argv", ["run_tiktok_organic", "--client", "disabled"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch(
+            "agency_analytics.client_config.load_client",
+            return_value={"active": True, "connectors": {"tiktok_organic": {"enabled": False}}},
+        ):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with pytest.raises(SystemExit) as exc:
+                    main()
+                assert exc.value.code == 0
+
+    # 5. Missing envs -> exit 1
+    monkeypatch.setattr(sys, "argv", ["run_tiktok_organic", "--client", "missing_env"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch(
+            "agency_analytics.client_config.load_client",
+            return_value={"active": True, "connectors": {"tiktok_organic": {"enabled": True}}},
+        ):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with patch(
+                    "agency_analytics.client_config.missing_envs", return_value=["MISSING_KEY"]
+                ):
+                    with pytest.raises(SystemExit) as exc:
+                        main()
+                    assert exc.value.code == 1
+
+    # 6. Success run
+    monkeypatch.setattr(sys, "argv", ["run_tiktok_organic", "--client", "good"])
+    monkeypatch.setenv("TT_KEY", "k")
+    monkeypatch.setenv("TT_SEC", "s")
+    monkeypatch.setenv("TT_RT", "r")
+    client_cfg = {
+        "active": True,
+        "connectors": {
+            "tiktok_organic": {
+                "enabled": True,
+                "open_id": "open123",
+                "client_key_env": "TT_KEY",
+                "client_secret_env": "TT_SEC",
+                "refresh_token_env": "TT_RT",
+            }
+        },
+    }
+    mock_pipeline = MagicMock()
+    mock_pipeline.run.return_value = "ok"
+    mock_sql = MagicMock()
+    mock_pipeline.sql_client.return_value.__enter__.return_value = mock_sql
+
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch("agency_analytics.client_config.load_client", return_value=client_cfg):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with patch("agency_analytics.client_config.missing_envs", return_value=[]):
+                    with patch("dlt.pipeline", return_value=mock_pipeline):
+                        with patch(
+                            "run_tiktok_organic.tiktok_organic_source", return_value="dummy_source"
+                        ):
+                            main()
+                            mock_pipeline.run.assert_called_once()
+                            mock_sql.execute_sql.assert_called()

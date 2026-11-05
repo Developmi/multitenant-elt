@@ -44,38 +44,8 @@ def _parse_iso_duration(duration: str) -> int:
     return hours * 3600 + minutes * 60 + seconds
 
 
-class _TokenManager(GoogleTokenManager):
-    """Cached OAuth access token obtained from a refresh token (stdlib urllib/requests only)."""
-
-    def get_token(self) -> str:
-        if self._access_token and time.time() < self._expires_at:
-            return self._access_token
-        return self._refresh()
-
-    def invalidate(self) -> None:
-        self._access_token = None
-        self._expires_at = 0.0
-
-    def _refresh(self) -> str:
-        data = {
-            "grant_type": "refresh_token",
-            "client_id": self._client_id,
-            "client_secret": self._client_secret,
-            "refresh_token": self._refresh_token,
-        }
-        try:
-            response = requests.post(TOKEN_ENDPOINT, data=data)
-        except requests.RequestException as e:
-            raise Exception(f"[YOUTUBE] Token request error: {e}")
-        payload = response.json()
-        access_token = payload.get("access_token")
-        if not access_token:
-            error = payload.get("error", "unknown error")
-            raise Exception(f"[YOUTUBE] Token refresh failed: {error}")
-        self._access_token = access_token
-        expires_in = int(payload.get("expires_in", 3600))
-        self._expires_at = time.time() + expires_in - 300
-        return self._access_token
+# Alias to unified GoogleTokenManager from agency_analytics.google_auth
+_TokenManager = GoogleTokenManager
 
 
 def _handle_response(response, context: str):
@@ -796,7 +766,7 @@ def youtube_source(
     return resources
 
 
-if __name__ == "__main__":
+def main():
     from dotenv import load_dotenv
 
     try:
@@ -808,28 +778,9 @@ if __name__ == "__main__":
     parser.add_argument("--client", required=True, help="Client ID from clients/ YAML")
     args = parser.parse_args()
 
-    client_file = client_config.client_file_path(args.client)
-
-    if not os.path.exists(client_file):
-        print(f"[YOUTUBE] Client file not found: {client_file}")
-        exit(1)
-
-    client = client_config.load_client(args.client)
-
-    if not client.get("active", True):
-        print(f"[YOUTUBE] Client {args.client} is not active. Skipping.")
-        exit(0)
-
-    errors = client_config.validate_client(client)
-    if errors:
-        for error in errors:
-            print(f"[YOUTUBE] {error}")
-        exit(1)
-
-    connector = client["connectors"].get("youtube", {})
-    if not connector.get("enabled"):
-        print(f"[YOUTUBE] YouTube connector not enabled for client {args.client}. Skipping.")
-        exit(0)
+    client, connector, _ = client_config.setup_connector_run(
+        "youtube", args, check_missing_envs=False
+    )
 
     channel_id = connector["channel_id"]
     token_env = connector.get("token_env", f"YOUTUBE_API_KEY_{args.client.upper()}")
@@ -892,3 +843,7 @@ if __name__ == "__main__":
         )
     )
     print(f"[YOUTUBE] Done: {info}")
+
+
+if __name__ == "__main__":
+    main()

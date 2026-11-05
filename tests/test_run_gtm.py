@@ -336,3 +336,121 @@ class TestGtmSource:
         assert "containers" in names
         assert "tags" in names
         assert "triggers" in names
+
+
+def test_gtm_handle_response_error_branches():
+    from dlt.sources.helpers import requests as dlt_requests
+    from run_gtm import _get_with_refresh, _handle_response
+
+    # 429 in data
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"error": {"code": 429}}
+    with patch("time.sleep"):
+        assert _handle_response(mock_resp, "ctx") is None
+
+    # 404
+    mock_resp.json.return_value = {"error": {"code": 404, "message": "Not Found"}}
+    with pytest.raises(Exception, match="Resource not found"):
+        _handle_response(mock_resp, "ctx")
+
+    # 400
+    mock_resp.json.return_value = {"error": {"code": 400, "message": "Bad req"}}
+    with pytest.raises(Exception, match="Bad request"):
+        _handle_response(mock_resp, "ctx")
+
+    # Generic error
+    mock_resp.json.return_value = {"error": {"code": 500, "message": "Server error"}}
+    with pytest.raises(Exception, match="API error 500"):
+        _handle_response(mock_resp, "ctx")
+
+    # _get_with_refresh RequestException
+    with patch("run_gtm.requests.get", side_effect=dlt_requests.RequestException("Conn drop")):
+        with pytest.raises(dlt_requests.RequestException):
+            _get_with_refresh("http://test", "ctx", access_token="tok")
+
+
+def test_gtm_main_cli(tmp_path, monkeypatch):
+    import runpy
+    import sys
+
+    # 1. Client file not found -> exit 1
+    monkeypatch.setattr(sys, "argv", ["run_gtm", "--client", "missing"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(tmp_path / "absent.yml")
+    ):
+        with pytest.raises(SystemExit) as exc:
+            runpy.run_path("src/connectors/run_gtm.py", run_name="__main__")
+        assert exc.value.code == 1
+
+    fake_client_file = tmp_path / "client.yml"
+    fake_client_file.write_text("active: false\n")
+
+    # 2. Inactive client -> exit 0
+    monkeypatch.setattr(sys, "argv", ["run_gtm", "--client", "inactive"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch("agency_analytics.client_config.load_client", return_value={"active": False}):
+            with pytest.raises(SystemExit) as exc:
+                runpy.run_path("src/connectors/run_gtm.py", run_name="__main__")
+            assert exc.value.code == 0
+
+    # 3. Validation error -> exit 1
+    monkeypatch.setattr(sys, "argv", ["run_gtm", "--client", "invalid"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch("agency_analytics.client_config.load_client", return_value={"active": True}):
+            with patch("agency_analytics.client_config.validate_client", return_value=["Err"]):
+                with pytest.raises(SystemExit) as exc:
+                    runpy.run_path("src/connectors/run_gtm.py", run_name="__main__")
+                assert exc.value.code == 1
+
+    # 4. Connector disabled -> exit 0
+    client_cfg = {"active": True, "connectors": {"gtm": {"enabled": False}}}
+    monkeypatch.setattr(sys, "argv", ["run_gtm", "--client", "disabled"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch("agency_analytics.client_config.load_client", return_value=client_cfg):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with pytest.raises(SystemExit) as exc:
+                    runpy.run_path("src/connectors/run_gtm.py", run_name="__main__")
+                assert exc.value.code == 0
+
+    # 5. Missing credentials -> exit 1
+    client_cfg_active = {
+        "active": True,
+        "connectors": {"gtm": {"enabled": True, "account_path": "12345"}},
+    }
+    monkeypatch.setattr(sys, "argv", ["run_gtm", "--client", "missing_creds"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch("agency_analytics.client_config.load_client", return_value=client_cfg_active):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with patch(
+                    "agency_analytics.google_auth.resolve_google_credentials", return_value=None
+                ):
+                    with pytest.raises(SystemExit) as exc:
+                        runpy.run_path("src/connectors/run_gtm.py", run_name="__main__")
+                    assert exc.value.code == 1
+
+    # 6. Success run with oauth_creds
+    oauth_creds = {"client_id": "cid", "client_secret": "sec", "refresh_token": "rt"}
+    mock_pipeline = MagicMock()
+    mock_pipeline.run.return_value = "gtm_ok"
+    monkeypatch.setattr(sys, "argv", ["run_gtm", "--client", "good"])
+    with patch(
+        "agency_analytics.client_config.client_file_path", return_value=str(fake_client_file)
+    ):
+        with patch("agency_analytics.client_config.load_client", return_value=client_cfg_active):
+            with patch("agency_analytics.client_config.validate_client", return_value=[]):
+                with patch(
+                    "agency_analytics.google_auth.resolve_google_credentials",
+                    return_value=oauth_creds,
+                ):
+                    with patch("dlt.pipeline", return_value=mock_pipeline):
+                        runpy.run_path("src/connectors/run_gtm.py", run_name="__main__")
+                        mock_pipeline.run.assert_called_once()

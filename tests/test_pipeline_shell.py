@@ -1,17 +1,11 @@
-"""Offline marker/guard tests for scripts/pipeline.sh (SDD-F WU1).
+"""Offline marker/guard tests for scripts/pipeline.sh.
 
-Spec NGT-R1/TLG-R1 -> NGT-S1..S4 / TLG-S1..S4, design D1-D3/D8. The nightly
-dbt exec must be a single ``dbt build --select`` invocation (models AND their
-tests for the exact select, one docker exec; a model/test failure folds into
-the existing failure branch -> dbt_status=failed -> failed verdict) while the
-``pipeline_run_steps`` series keeps step_name ``dbt_run``. Telegram keys read
-exactly TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID from root ./.env when unset (env
-wins) via a file-guarded, key-targeted, export-free fallback.
-
-These are file-marker tests (house precedent: test_wipe_sim.py:896/:912
-``read_text`` scanning): the pipeline script is host-shell behavior that the
-CI pytest-only suite must never execute, so the assertions pin the authored
-guard lines instead (design D8; bash -n proves syntax, not semantics).
+Validates that:
+1. scripts/pipeline.sh is a clean host-side wrapper that delegates orchestration
+   to agency_analytics.pipeline_runner inside agency_pipeline.
+2. Host container health checks validate both agency_postgres and agency_pipeline.
+3. Telegram credentials adhere to file-guarded, key-targeted fallback (host env wins)
+   without process env pollution (no set -a, no export, no full source).
 """
 
 from pathlib import Path
@@ -27,25 +21,19 @@ def _assert_absent(text: str, fragment: str, label: str) -> None:
     )
 
 
-def test_nightly_exec_runs_dbt_build_over_the_select():
-    """NGT-S1: the nightly exec is one ``dbt build`` over ``${dbt_select}``."""
-    assert 'dbt build --select "${dbt_select}"' in _TEXT, (
-        "nightly exec must run dbt build --select over ${dbt_select}"
+def test_nightly_delegates_to_python_pipeline_runner():
+    """Consolidated runner: host script delegates directly to agency_analytics.pipeline_runner."""
+    assert "python3 -m agency_analytics.pipeline_runner" in _TEXT, (
+        "scripts/pipeline.sh must delegate execution to agency_analytics.pipeline_runner"
     )
-    _assert_absent(_TEXT, "dbt run --select", "NGT-S1")
+    assert "docker exec" in _TEXT
+    assert "agency_pipeline" in _TEXT
 
 
-def test_nightly_step_name_stays_dbt_run():
-    """NGT-S1: pipeline_run_steps keeps step_name dbt_run (D2, series intact)."""
-    assert 'pipeline_start_step "$run_id" "dbt_run"' in _TEXT, (
-        "step_name must stay dbt_run so the pipeline_run_steps series is not split"
-    )
-
-
-def test_nightly_build_failure_reason_is_truthful():
-    """NGT-S2: the failure reason string names the build subcommand."""
-    assert "dbt build falló" in _TEXT, "failure reason must read 'dbt build falló'"
-    _assert_absent(_TEXT, "dbt run falló", "NGT-S2")
+def test_nightly_validates_required_containers_health():
+    """Health check guards: verifies postgres and pipeline containers are healthy."""
+    assert 'check_container "agency_postgres"' in _TEXT
+    assert 'check_container "agency_pipeline"' in _TEXT
 
 
 def test_telegram_env_guard_sits_after_both_defaults():

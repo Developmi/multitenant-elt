@@ -238,28 +238,7 @@ if __name__ == "__main__":
     parser.add_argument("--client", required=True, help="Client ID from clients/ YAML")
     args = parser.parse_args()
 
-    client_file = client_config.client_file_path(args.client)
-
-    if not os.path.exists(client_file):
-        print(f"[GTM] Client file not found: {client_file}")
-        sys.exit(1)
-
-    client = client_config.load_client(args.client)
-
-    if not client.get("active", True):
-        print(f"[GTM] Client {args.client} is not active. Skipping.")
-        sys.exit(0)
-
-    errors = client_config.validate_client(client)
-    if errors:
-        for error in errors:
-            print(f"[GTM] {error}")
-        sys.exit(1)
-
-    connector = client["connectors"].get("gtm", {})
-    if not connector.get("enabled"):
-        print(f"[GTM] GTM connector not enabled for client {args.client}. Skipping.")
-        sys.exit(0)
+    client, connector, _ = client_config.setup_connector_run("gtm", args)
 
     account_path = connector["account_path"]
     if account_path and not account_path.startswith("accounts/"):

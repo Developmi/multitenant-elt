@@ -211,40 +211,7 @@ def main():
     parser.add_argument("--client", required=True, help="Client ID from clients/ YAML")
     args = parser.parse_args()
 
-    client_file = client_config.client_file_path(args.client)
-
-    if not os.path.exists(client_file):
-        print(f"[TIKTOK_ORGANIC] Client file not found: {client_file}")
-        exit(1)
-
-    client = client_config.load_client(args.client)
-
-    if not client.get("active", True):
-        print(f"[TIKTOK_ORGANIC] Client {args.client} is not active. Skipping.")
-        exit(0)
-
-    errors = client_config.validate_client(client)
-    if errors:
-        for error in errors:
-            print(f"[TIKTOK_ORGANIC] {error}")
-        exit(1)
-
-    connector = client["connectors"].get("tiktok_organic", {})
-    if not connector.get("enabled"):
-        print(
-            "[TIKTOK_ORGANIC] TikTok Organic connector"
-            f" not enabled for client {args.client}. Skipping."
-        )
-        exit(0)
-
-    missing = client_config.missing_envs("tiktok_organic", connector)
-    if missing:
-        for env_name in missing:
-            print(
-                f"[TIKTOK_ORGANIC] Environment variable {env_name} is not set"
-                f" for client {args.client}."
-            )
-        exit(1)
+    client, connector, _ = client_config.setup_connector_run("tiktok_organic", args)
 
     open_id = connector["open_id"]
     client_key = os.environ[connector["client_key_env"]]
