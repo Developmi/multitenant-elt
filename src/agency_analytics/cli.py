@@ -71,6 +71,19 @@ def cmd_dlt(args):
     return result.returncode
 
 
+def cmd_auth_meta(args):
+    from agency_analytics.meta_auth import run_meta_auth_wizard
+
+    return run_meta_auth_wizard(
+        client_id=args.client,
+        app_id=args.app_id,
+        app_secret=args.app_secret,
+        token=args.token,
+        env_path=args.env_path,
+        interactive=not args.non_interactive,
+    )
+
+
 def cli():
     parser = argparse.ArgumentParser(
         prog="multitenant-elt",
@@ -97,6 +110,27 @@ def cli():
     )
     p_dlt.add_argument("--client", required=True, help="ID del cliente")
     p_dlt.set_defaults(func=cmd_dlt)
+
+    p_auth = subparsers.add_parser("auth", help="Authentication and token management tools")
+    auth_subparsers = p_auth.add_subparsers(dest="auth_provider", required=True)
+
+    p_meta = auth_subparsers.add_parser(
+        "meta",
+        help="Interactive Meta Graph API token renewal and Page Access Token resolution wizard",
+    )
+    p_meta.add_argument(
+        "--client", default=None, help="Target client ID to update in .env (e.g. client_example)"
+    )
+    p_meta.add_argument("--app-id", default=None, help="Meta Application ID")
+    p_meta.add_argument("--app-secret", default=None, help="Meta Application Secret")
+    p_meta.add_argument("--token", default=None, help="Initial short-lived User Access Token")
+    p_meta.add_argument("--env-path", default=".env", help="Path to .env file (default: .env)")
+    p_meta.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Run without interactive prompts (fails if required flags are omitted)",
+    )
+    p_meta.set_defaults(func=cmd_auth_meta)
 
     args = parser.parse_args()
     return args.func(args)

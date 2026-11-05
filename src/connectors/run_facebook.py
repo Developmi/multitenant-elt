@@ -114,7 +114,7 @@ def _execute_batch(batch_requests, access_token):
     raise Exception("[FACEBOOK] Batch max retries exceeded")
 
 
-def _fetch_page_batch(endpoint, page_id, access_token, cursor=None, limit=50):
+def _fetch_page_batch(endpoint, page_id, access_token, cursor=None, limit=25):
     fields_core = (
         "id,message,created_time,permalink_url,story,from,"
         "full_picture,status_type,is_published,updated_time"

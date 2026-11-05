@@ -9,11 +9,11 @@ SHELL := /bin/bash
 
 TOOLS := tools/bin
 
-.PHONY: help install lock lint format check typecheck test quality
+.PHONY: help install lock lint format check typecheck test quality release-ready
 .PHONY: lint-docker lint-actions lint-all test-security
 .PHONY: tools reinstall doctor
 .PHONY: clean pristine
-.PHONY: setup-networks setup-env pipeline
+.PHONY: setup-networks setup-env pipeline auth-meta
 .PHONY: docker-build docker-build-pipeline
 .PHONY: docker-up docker-up-all docker-down docker-logs
 .PHONY: docker-db docker-pipeline docker-metabase
@@ -81,6 +81,10 @@ test-security: ## Run Trivy filesystem vulnerability scan
 quality:       ## Full gate: lint-all -> test -> test-security
 	$(MAKE) lint-all
 	$(MAKE) test
+	$(MAKE) test-security
+
+release-ready: ## Full pre-release verification gate (lint-all, test, test-security)
+	$(MAKE) quality
 
 # === DEV TOOLS =============================================================
 
@@ -140,6 +144,9 @@ setup-env:      ## Copy global .env.example -> .env
 
 pipeline:       ## Run pipeline orchestration
 	./scripts/pipeline.sh
+
+auth-meta:      ## Run interactive Meta token renewal wizard (usage: make auth-meta [CLIENT=acme])
+	@uv run python main.py auth meta $(if $(CLIENT),--client $(CLIENT),)
 
 # === DOCKER - BUILD ========================================================
 
