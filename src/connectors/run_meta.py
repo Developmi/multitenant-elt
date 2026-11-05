@@ -231,34 +231,7 @@ def main():
     parser.add_argument("--client", required=True, help="Client ID from clients/ YAML")
     args = parser.parse_args()
 
-    client_file = client_config.client_file_path(args.client)
-
-    if not os.path.exists(client_file):
-        print(f"[META] Client file not found: {client_file}")
-        exit(1)
-
-    client = client_config.load_client(args.client)
-
-    if not client.get("active", True):
-        print(f"[META] Client {args.client} is not active. Skipping.")
-        exit(0)
-
-    errors = client_config.validate_client(client)
-    if errors:
-        for error in errors:
-            print(f"[META] {error}")
-        exit(1)
-
-    connector = client.get("connectors", {}).get("meta", {})
-    if not connector.get("enabled"):
-        print(f"[META] Meta Ads connector not enabled for client {args.client}. Skipping.")
-        exit(0)
-
-    missing = client_config.missing_envs("meta", connector)
-    if missing:
-        for env_name in missing:
-            print(f"[META] Environment variable {env_name} is not set for client {args.client}.")
-        exit(1)
+    _, connector, _ = client_config.setup_connector_run("meta", args)
 
     account_id = connector["account_id"]
     token_env = connector["token_env"]
