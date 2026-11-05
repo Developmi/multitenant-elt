@@ -6,10 +6,11 @@
 
 *Eliminate manual reporting across 10 marketing platforms - one pipeline, one dashboard, zero spreadsheets.*
 
+[![Version](https://img.shields.io/badge/Version-v1.3.0-blue?style=for-the-badge)](CHANGELOG.md)
 [![Python](https://img.shields.io/badge/Python_3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)](pyproject.toml)
 [![Docker](https://img.shields.io/badge/Docker_|_READY-2496ED?style=for-the-badge&logo=docker&logoColor=white)](Dockerfile)
 [![CI](https://img.shields.io/badge/CI-Passing-brightgreen?style=for-the-badge)](.github/workflows)
-[![Tests](https://img.shields.io/badge/Tests-355%20passed-success?style=for-the-badge)](tests)
+[![Tests](https://img.shields.io/badge/Tests-361%20passed-success?style=for-the-badge)](tests)
 [![FinOps](https://img.shields.io/badge/FinOps-98%25%20OpEx%20Reduction-2ea44f?style=for-the-badge)](#-finops--cost-efficiency)
 [![Security](https://img.shields.io/badge/Security-Trivy%20%7C%20Cosign%20%7C%20SLSA-blue?style=for-the-badge)](SECURITY.md)
 [![Status](https://img.shields.io/badge/Status-Production_Active-brightgreen?style=for-the-badge)](#-features)
@@ -73,7 +74,7 @@ mindmap
 - **No-code connector config**: Add/remove platforms per client via YAML, no code changes
 - **Pipeline orchestration**: Health checks, per-client loops, Telegram alerts
 - **dbt transformations**: 30 staging models → intermediate → marts (35 models total)
-- **Quality gate**: 355 tests (354 passed, 1 skipped), ruff linting, mypy type checking
+- **Quality gate**: 362 tests (361 passed, 1 skipped), ruff linting, mypy type checking
 - **Docker native**: Isolated services, two Docker networks, no vendor lock-in
 
 ---
@@ -161,7 +162,7 @@ make docker-up-all     # Start Postgres, Pipeline, and Metabase (opt-in profile)
 
 ```bash
 make setup-env        # Ensure .env exists
-make test             # 355 tests should pass
+make test             # 361 tests should pass
 ./scripts/pipeline.sh  # Full E2E pipeline (or use cron)
 ```
 
@@ -212,7 +213,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full design.
 │   ├── pipeline.sh
 │   └── setup-networks.sh
 │
-├── tests/                          # 355 mock/unit-based tests
+├── tests/                          # 362 mock/unit-based tests
 ├── .env.example
 ├── pyproject.toml
 └── .gitignore
@@ -294,16 +295,30 @@ See [.env.example](.env.example) for the full list of environment variables.
 
 ---
 
-## 🧪 Tests
+## 🧪 Tests & Quality Gate
 
 ```bash
-make test               # Run all tests (355 tests)
+make test               # Run all tests (361 passed, 1 skipped)
 make lint               # ruff check
 make typecheck          # mypy
-make quality            # Full gate: lint + typecheck + test
+make test-security      # Trivy vulnerability & secret scan
+make quality            # Full gate: lint-all + test + test-security
+make release-ready      # Pre-release verification gate
 ```
 
 All tests are mock-based - no live API calls. Each connector has tests for success paths, rate limits, token expiry, pagination, and error handling.
+
+---
+
+## 🔑 Authentication & Token Management
+
+```bash
+# Interactive Meta Graph API Token Renewal Wizard
+# Automatically exchanges short-lived tokens for 60-day user tokens & permanent Page Access Tokens
+make auth-meta
+# Or for a specific client:
+make auth-meta CLIENT=acme
+```
 
 ---
 
