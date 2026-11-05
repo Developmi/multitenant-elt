@@ -19,9 +19,9 @@ ARG CREATED=""
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1 - builder: install Python dependencies via uv
 # ─────────────────────────────────────────────────────────────────────────────
-# python:3.12-slim <2026-10-09> — digest-pinned to stop base drift
+# python:3.12-slim <2026-11-04> — digest-pinned to stop base drift
 # (dependabot `docker` updates bump this pin).
-FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS builder
+FROM python:3.12-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30 AS builder
 
 # uv 0.12.7 <2026-09-04> — digest-pinned (no :latest, clears hadolint DL3007)
 COPY --from=ghcr.io/astral-sh/uv:0.12.7@sha256:95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945 /uv /uvx /bin/
@@ -41,8 +41,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2 - runtime: minimal image with Python venv only
 # ─────────────────────────────────────────────────────────────────────────────
-# python:3.12-slim <2026-10-09> — digest-pinned (matches builder stage).
-FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+# python:3.12-slim <2026-11-04> — digest-pinned (matches builder stage).
+FROM python:3.12-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30
 
 # Re-declare ARGs inside the stage to consume the global defaults (Docker
 # scoping); --build-arg values override them for CI builds.

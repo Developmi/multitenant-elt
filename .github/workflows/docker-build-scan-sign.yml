@@ -9,15 +9,6 @@ name: Docker build, scan & sign
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "Dockerfile"
-      - ".dockerignore"
-      - "scripts/docker-entrypoint.sh"
-      - "main.py"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "src/**"
-      - ".github/workflows/docker-build-scan-sign.yml"
   push:
     tags: ["v*"]
 

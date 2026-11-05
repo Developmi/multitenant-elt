@@ -18,10 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - **Supply Chain Remediation**: Upgraded `certifi` (`2026.10.23`), `gitpython` (`3.2.1`), and `msgpack` (`1.2.4`) in `uv.lock`, mitigating 1 CRITICAL (GHSA-6q48-6c7w-9gw2) and 6 HIGH CVEs (CVE-2026-114145, CVE-2026-114613).
+- **Container Base Hardening**: Bumped `python:3.12-slim` base image digest to `b18b261e1b49...` resolving Debian 13.7 CVE-2026-109518 (`apt`/`libapt-pkg7.0`).
 - **Environment Topology Hardening**: Pruned redundant `.env.example` files across subdirectories (`services/db/`, `services/metabase/`, `services/pipeline/`), strictly enforcing the root `.env.example` as the canonical configuration Single Source of Truth.
 
 ### Fixed
 
+- **CI Enforcement**: Removed path filter on `docker-build-scan-sign.yml` to guarantee the required status check runs on every pull request.
 - **Facebook Feed Extraction**: Reduced page post batch fetch limit from 50 to 25 items in `src/connectors/run_facebook.py` to prevent Meta Graph API query complexity 500 errors.
 
 ## [1.2.0] - 2026-10-17
