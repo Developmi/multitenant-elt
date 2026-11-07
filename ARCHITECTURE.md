@@ -37,6 +37,10 @@ The system follows an **ELT** pattern (Extract → Load → Transform): raw data
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+### Storage & Warehouse Strategy
+
+The platform deploys **PostgreSQL 16** (`agency_dw`) for sovereign transactional and analytical storage, providing robust ACID schema isolation per tenant (`raw_<connector>_<client_id>` and `client_<id>`). For high-throughput ad-event analytics (>10M rows), the architectural blueprint aligns with the Developmi organization data stack (`dlt + dbt + ClickHouse + Metabase`), where ClickHouse acts as the analytical columnar destination via native `dlt` destination adapters.
+
 ---
 
 ## Docker Network Architecture
