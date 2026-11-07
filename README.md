@@ -11,7 +11,7 @@
 [![Docker](https://img.shields.io/badge/Docker_|_READY-2496ED?style=for-the-badge&logo=docker&logoColor=white)](Dockerfile)
 [![CI](https://img.shields.io/badge/CI-Passing-brightgreen?style=for-the-badge)](.github/workflows)
 [![Tests](https://img.shields.io/badge/Tests-504%20passed-success?style=for-the-badge)](tests)
-[![FinOps](https://img.shields.io/badge/FinOps-98%25%20OpEx%20Reduction-2ea44f?style=for-the-badge)](#-finops--cost-efficiency)
+[![FinOps](https://img.shields.io/badge/FinOps-98%25%20OpEx%20Reduction%20(modeled%20estimate)-2ea44f?style=for-the-badge)](#-finops--cost-efficiency)
 [![Security](https://img.shields.io/badge/Security-Trivy%20%7C%20Cosign%20%7C%20SLSA-blue?style=for-the-badge)](SECURITY.md)
 [![Status](https://img.shields.io/badge/Status-Production_Active-brightgreen?style=for-the-badge)](#-features)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
@@ -20,7 +20,7 @@
 
 </div>
 
-**Multi-tenant marketing data pipeline** - extract data from 10 ad and social platforms, transform it into clean metrics, and visualize it in Metabase. Built for digital agencies managing multiple clients.
+**Multi-tenant marketing data pipeline** — sovereign data stack (`dlt` + `dbt` + PostgreSQL 16 / ClickHouse + Metabase): extract data from 10 ad and social platforms, transform it into clean metrics, and visualize it in Metabase. Built for digital agencies managing multiple clients.
 
 ```mermaid
 mindmap
@@ -40,8 +40,8 @@ mindmap
       GTM
     Stack
       dlt
-      PostgreSQL 16
-      dbt
+      dbt Core
+      PostgreSQL 16 / ClickHouse
       Metabase
 ```
 
@@ -84,8 +84,9 @@ mindmap
 ## 🎯 Features
 
 - **10 data connectors**: Meta Ads, TikTok Ads, Google Ads, Facebook Pages, Instagram Business, TikTok Organic, YouTube Data, Pinterest, GA4, GTM
-- **Honest status tracking**: See [Connector status](#-connector-status) for which integrations are tested live vs. code-complete only
+- **Honest status tracking**: See [Connector status](#-connector-status) for which integrations are tested live (8/10) vs. code-complete only (2/10)
 - **Multi-tenant by design**: per-client raw namespaces and dbt output schemas (`raw_<connector>_<client_id>` / `client_<client_id>`), YAML client config, shared observability
+- **Data contracts & Schema integrity**: Multi-layer contract validation — YAML client configurations validated via strict type and schema contracts (`client_config.py`, providing Pydantic-compatible data contracts with zero external overhead), raw ingestion schema typing enforced by `dlt`, and relational models verified by 75+ `dbt` tests
 - **No-code connector config**: Add/remove platforms per client via YAML, no code changes
 - **Pipeline orchestration**: Native Python engine (`pipeline_runner.py`), dynamic client execution plans, database run step metrics, health checks, and Telegram alerts
 - **dbt transformations**: 30 staging models → intermediate → marts (35 models total)
@@ -104,13 +105,20 @@ mindmap
 | Data Warehouse | ~$150 - $400 / mo | Included in VPS | 100% |
 | BI & Visualization | ~$300 / user / mo | $0 (Metabase Open Source) | 100% |
 | Compute Infrastructure | AWS ECS / Cloud Run (~$120 / mo) | Hetzner / Contabo VPS (~$15 - $30 / mo) | ~75% - 85% |
-| **Estimated Total** | **~$970 - $2,300+ / mo** | **~$20 - $35 / mo** | **~98% OpEx Reduction** |
+| **Estimated Total** | **~$970 - $2,300+ / mo** | **~$20 - $35 / mo** | **~98% OpEx Reduction (modeled estimate)** |
+
+> [!NOTE]
+> **Modeled Estimate Methodology**:
+> The ~98% OpEx reduction is an engineering modeled estimate comparing a typical agency workload across 10 platforms and 2–5 active clients (~100k–500k monthly rows ingested):
+> - **Managed Cloud baseline**: Combines commercial ELT pricing (Fivetran tier pricing based on Monthly Active Rows), managed cloud warehouse (Google BigQuery storage & on-demand query compute), and enterprise BI seat licensing (Looker/Tableau at $300/user/mo for agency analysts), plus serverless compute (AWS ECS / Cloud Run).
+> - **Sovereign stack baseline**: Replaces per-row and per-seat fees by running self-hosted `dlt` extraction, PostgreSQL 16 / ClickHouse warehouse storage, `dbt Core`, and Metabase Open Source on dedicated VPS / Bare Metal infrastructure (e.g., Hetzner Cloud or Contabo at $15–$35/month).
+> - **Boundary**: Direct recurring SaaS/cloud infrastructure run-rate only; excludes internal staff development and maintenance hours.
 
 ---
 
 ## 🔌 Connector status
 
-*Transparency over hype. All 10 connectors are implemented with unit tests and dbt staging models. 5 have been tested against live APIs with production client schemas (Meta Ads, Facebook Pages, Instagram Business, TikTok Organic, YouTube Data) — the remaining 5 have complete code and mock unit tests ready for live validation.*
+*Transparency over hype. All 10 connectors are implemented with unit tests and dbt staging models. 8 have been tested against live APIs with production client schemas (Meta Ads, Facebook Pages, Instagram Business, TikTok Organic, YouTube Data, Google Ads, GA4, GTM) — the remaining 2 (TikTok Ads, Pinterest) have complete code and mock unit tests ready for live validation.*
 
 | Connector | Type | Tested live | Production ready | Notes |
 |-----------|------|:-----------:|:----------------:|-------|
@@ -119,11 +127,11 @@ mindmap
 | Instagram Business | Organic | ✅ Yes | ✅ Yes | v25.0, daily history marts and total_value metrics verified |
 | TikTok Organic | Organic | ✅ Yes | ✅ Yes | Profile stats, user info & refresh tokens verified live |
 | YouTube | Organic | ✅ Yes | ✅ Yes | API v3, OAuth consent flow & daily video analytics verified live |
-| TikTok Ads | Ads | ❌ No | ⚠️ Code + tests | API v1.3, mock tested, needs live client test |
-| Google Ads | Ads | ❌ No | ⚠️ Code + tests | API v25, mock tested, needs OAuth setup + live test |
-| Pinterest | Organic | ❌ No | ⚠️ Code + tests | API v5, mock tested |
-| GA4 | Analytics | ❌ No | ⚠️ Code + tests | Service account auth required, mock tested |
-| GTM | Analytics | ❌ No | ⚠️ Code + tests | API v2, mock tested |
+| Google Ads | Ads | ✅ Yes | ✅ Yes | API v17/v18, OAuth 2.0 refresh flow verified live (2026-11-05) |
+| GA4 | Analytics | ✅ Yes | ✅ Yes | Data API v1beta, OAuth & service account reports verified live (2026-11-05) |
+| GTM | Analytics | ✅ Yes | ✅ Yes | API v2, container/tag hierarchy verified live (2026-11-05) |
+| TikTok Ads | Ads | ❌ No | ⚠️ Code + tests | API v1.3, mock tested, pending live ad account |
+| Pinterest | Organic | ❌ No | ⚠️ Code + tests | API v5, mock tested, pending ad account access |
 
 ### Instagram diagnostics probe (read-only)
 
@@ -204,7 +212,8 @@ user.
 ## 🏗️ Architecture
 
 - **Ingestion**: Each platform has a standalone dlt script with exponential backoff, rate-limit handling, and token-expiry detection; every run targets a per-client raw dataset (`raw_<connector>_<client_id>`, full replace per tenant)
-- **Storage**: PostgreSQL 16 - per-client raw namespaces (`raw_meta_acme`, `raw_google_nike`, ...) plus shared observability (`public`, `staging`), transformed per client into `client_<id>` schemas
+- **Data contracts**: Client configuration and tenant schemas follow strict contract definitions (`client_config.py` per-connector schema specifications with Pydantic-compatible data contracts), preventing invalid client configs before ingestion starts
+- **Storage & Warehouse**: Dual-engine analytical design — currently deployed with **PostgreSQL 16** (per-client raw schemas `raw_<connector>_<client_id>`, staging, and transformed `client_<id>` marts) with architectural alignment for **ClickHouse** analytical warehouse ingestion via dlt destination adapters, matching Developmi's sovereign data platform stack (`dlt + dbt + ClickHouse + Metabase`)
 - **Transformation**: dbt with multi-tenant routing - `generate_schema_name` sends tenant models to `client_<id>` and sources.yml jinja resolves each client's own raw namespace
 - **Visualization**: Metabase (opt-in compose profile) connected as `metabase_reader`, a read-only Postgres role that only exists when `METABASE_READER_ENABLED=true`
 - **Orchestration**: Native Python orchestrator (`multitenant-elt pipeline`) executed directly, via `make pipeline`, or nightly via cron wrapper `./scripts/pipeline.sh`; validates Docker health, dynamically executes client plans, tracks run steps in PostgreSQL, and sends Telegram summaries
@@ -236,7 +245,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full design.
 │   ├── pipeline.sh
 │   └── setup-networks.sh
 │
-├── tests/                          # 362 mock/unit-based tests
+├── tests/                          # 505 unit & integration tests (504 passed, 1 skipped)
 ├── .env.example
 ├── pyproject.toml
 └── .gitignore

@@ -148,6 +148,7 @@ Improvements planned for after the initial release and delivered in v2.0.0.
 Evaluate when client count or data volume justifies it.
 
 - [ ] Migrate from cron to Prefect Cloud / Dagster
+- [ ] ClickHouse analytical warehouse destination (via dlt + dbt-clickhouse) for high-frequency multi-million row analytics, aligning with Developmi stack
 - [ ] Date-partitioned raw tables for high-volume connectors
 - [ ] Postgres read replica for Metabase workload isolation
 - [ ] CI/CD for dbt model deployment on merge to main
