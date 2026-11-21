@@ -21,7 +21,7 @@ ARG CREATED=""
 # ─────────────────────────────────────────────────────────────────────────────
 # python:3.12-slim <2026-11-04> — digest-pinned to stop base drift
 # (dependabot `docker` updates bump this pin).
-FROM python:3.12-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30 AS builder
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS builder
 
 # uv 0.12.7 <2026-09-04> — digest-pinned (no :latest, clears hadolint DL3007)
 COPY --from=ghcr.io/astral-sh/uv:0.12.7@sha256:95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945 /uv /uvx /bin/
@@ -42,7 +42,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Stage 2 - runtime: minimal image with Python venv only
 # ─────────────────────────────────────────────────────────────────────────────
 # python:3.12-slim <2026-11-04> — digest-pinned (matches builder stage).
-FROM python:3.12-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 
 # Re-declare ARGs inside the stage to consume the global defaults (Docker
 # scoping); --build-arg values override them for CI builds.
