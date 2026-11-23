@@ -75,6 +75,11 @@ htmlcov/
 secrets/
 .envsitter/
 openspec/
+odd/
+audit/
+graphify-out/
+.direnv/
+clients/secrets/
 
 # Supply chain (SBOM / attestations)
 sbom.*.json
