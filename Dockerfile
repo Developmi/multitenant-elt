@@ -19,9 +19,9 @@ ARG CREATED=""
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1 - builder: install Python dependencies via uv
 # ─────────────────────────────────────────────────────────────────────────────
-# python:3.12-slim <2026-11-04> — digest-pinned to stop base drift
+# python:3.12-slim <2026-11-22> — digest-pinned to stop base drift
 # (dependabot `docker` updates bump this pin).
-FROM python:3.12-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30 AS builder
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS builder
 
 # uv 0.12.7 <2026-09-04> — digest-pinned (no :latest, clears hadolint DL3007)
 COPY --from=ghcr.io/astral-sh/uv:0.12.7@sha256:95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945 /uv /uvx /bin/
@@ -41,8 +41,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2 - runtime: minimal image with Python venv only
 # ─────────────────────────────────────────────────────────────────────────────
-# python:3.12-slim <2026-11-04> — digest-pinned (matches builder stage).
-FROM python:3.12-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30
+# python:3.12-slim <2026-11-22> — digest-pinned (matches builder stage).
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 
 # Re-declare ARGs inside the stage to consume the global defaults (Docker
 # scoping); --build-arg values override them for CI builds.
@@ -50,13 +50,12 @@ ARG SOURCE
 ARG REVISION
 ARG CREATED
 
-# ponytail: Temporary runtime apt patch to clear Debian CVE-2026-109518 on CI gate.
+# ponytail: Temporary runtime apt patch to clear Debian CVE-2026-85091 (zlib1g) and CVE-2026-109518 on CI gate.
 # Sub-optimal layer pattern: base OS CVEs belong in the base image, but upstream
-# python:3.12-slim has not yet rebuilt with apt 3.0.4.
-# Removal condition: Delete this RUN block once dependabot bumps python:3.12-slim to a digest shipping apt >= 3.0.4.
+# Debian package releases require explicit runtime package installation until new image builds.
 # hadolint ignore=DL3008
 RUN apt-get update && \
-    apt-get install --no-install-recommends -y apt libapt-pkg7.0 && \
+    apt-get install --no-install-recommends -y apt libapt-pkg7.0 zlib1g && \
     rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid 1000 app && \

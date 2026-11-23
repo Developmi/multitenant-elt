@@ -41,6 +41,9 @@ The system follows an **ELT** pattern (Extract → Load → Transform): raw data
 
 The platform deploys **PostgreSQL 16** (`agency_dw`) for sovereign transactional and analytical storage, providing robust ACID schema isolation per tenant (`raw_<connector>_<client_id>` and `client_<id>`). For high-throughput ad-event analytics (>10M rows), the architectural blueprint aligns with the Developmi organization data stack (`dlt + dbt + ClickHouse + Metabase`), where ClickHouse acts as the analytical columnar destination via native `dlt` destination adapters.
 
+#### Raw Insights Historical Archiving
+Raw historical snapshots for social accounts (follower counts, daily profile insights) are recorded by `src/agency_analytics/archiver.py` using parameterized SQL idempotency (`INSERT ... ON CONFLICT`). Native `dlt` merge migration is intentionally deferred under Ponytail YAGNI principles (see [ROADMAP.md](ROADMAP.md) → Technical Debt & Deferrals), as execution takes <0.05s nightly and maintains 100% backward compatibility with active database schemas.
+
 ---
 
 ## Docker Network Architecture
