@@ -518,6 +518,100 @@ def test_token_auto_refresh(monkeypatch):
     assert mock_state.get("tiktok_organic_refresh_token") == "new_refresh_token"
 
 
+def test_token_auto_refresh_persists_to_env_and_file(monkeypatch, tmp_path):
+    refresh_response = {
+        "access_token": "fresh_access_token",
+        "refresh_token": "rotated_rt_999",
+        "expires_in": 86400,
+    }
+    stats_response = _ok_response(
+        {
+            "data": {
+                "user": {
+                    "follower_count": 100,
+                    "following_count": 10,
+                    "likes_count": 500,
+                    "video_count": 5,
+                }
+            }
+        }
+    )
+
+    monkeypatch.setattr(f"{MODULE}._refresh_access_token", lambda ck, cs, rt: refresh_response)
+    mock_state: dict = {}
+    monkeypatch.setattr(f"{MODULE}.dlt.current.source_state", lambda: mock_state)
+    monkeypatch.setattr(
+        f"{MODULE}.requests.request", lambda *a, **kw: _mock_response(stats_response)
+    )
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("TIKTOK_ORGANIC_REFRESH_TOKEN_BONILLA=old_rt\n")
+    monkeypatch.setenv("TIKTOK_ORGANIC_REFRESH_TOKEN_BONILLA", "old_rt")
+
+    from run_tiktok_organic import tiktok_organic_source
+
+    source = tiktok_organic_source(
+        "test_open_id",
+        "test_ck",
+        "test_cs",
+        "old_rt",
+        refresh_token_env="TIKTOK_ORGANIC_REFRESH_TOKEN_BONILLA",
+        env_path=env_file,
+    )
+    list(source.resources["profile_stats"])
+
+    assert mock_state["tiktok_organic_refresh_token"] == "rotated_rt_999"
+    assert os.environ["TIKTOK_ORGANIC_REFRESH_TOKEN_BONILLA"] == "rotated_rt_999"
+    content = env_file.read_text()
+    assert "TIKTOK_ORGANIC_REFRESH_TOKEN_BONILLA=rotated_rt_999" in content
+    if os.name == "posix":
+        assert (env_file.stat().st_mode & 0o777) == 0o600
+
+
+def test_token_auto_refresh_handles_update_env_error(monkeypatch, tmp_path, capsys):
+    refresh_response = {
+        "access_token": "fresh_at",
+        "refresh_token": "rotated_rt",
+        "expires_in": 86400,
+    }
+    stats_response = _ok_response(
+        {
+            "data": {
+                "user": {
+                    "follower_count": 10,
+                    "following_count": 1,
+                    "likes_count": 1,
+                    "video_count": 1,
+                }
+            }
+        }
+    )
+    monkeypatch.setattr(f"{MODULE}._refresh_access_token", lambda ck, cs, rt: refresh_response)
+    mock_state: dict = {}
+    monkeypatch.setattr(f"{MODULE}.dlt.current.source_state", lambda: mock_state)
+    monkeypatch.setattr(
+        f"{MODULE}.requests.request", lambda *a, **kw: _mock_response(stats_response)
+    )
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("TT_RT=old\n")
+
+    with patch("agency_analytics.secrets_store.update_env_value", side_effect=OSError("Disk full")):
+        from run_tiktok_organic import tiktok_organic_source
+
+        source = tiktok_organic_source(
+            "test_open_id",
+            "test_ck",
+            "test_cs",
+            "old",
+            refresh_token_env="TT_RT",
+            env_path=env_file,
+        )
+        list(source.resources["profile_stats"])
+        out = capsys.readouterr().out
+        assert "Warning: Failed to persist rotated token" in out
+
+
 def test_token_auto_refresh_uses_stored_refresh_token(monkeypatch):
     refresh_response = {
         "access_token": "fresh_token",
