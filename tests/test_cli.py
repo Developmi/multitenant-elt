@@ -22,6 +22,28 @@ class TestCliSubcommands:
 
     @patch("agency_analytics.cli.CLIENTS_DIR")
     @patch("agency_analytics.cli.subprocess.run")
+    def test_cmd_pipeline_client_filter_and_inactive(self, mock_run, mock_clients_dir, tmp_path):
+        client_file = tmp_path / "acme.yml"
+        client_file.write_text("active: false\nconnectors:\n  google:\n    enabled: true\n")
+        mock_clients_dir.__truediv__.return_value = client_file
+        args = MagicMock(client="acme", connector="google")
+        ret = cli.cmd_pipeline(args)
+        assert ret == 0  # 0 succeeded, 0 failed -> returns 0
+        assert mock_run.call_count == 0
+
+    @patch("agency_analytics.cli.CLIENTS_DIR")
+    def test_cmd_pipeline_yaml_error(self, mock_clients_dir, tmp_path, capsys):
+        bad_file = tmp_path / "broken.yml"
+        bad_file.write_text(": : bad yaml\n")
+        mock_clients_dir.glob.return_value = [bad_file]
+        args = MagicMock(client=None, connector=None)
+        ret = cli.cmd_pipeline(args)
+        assert ret == 1
+        out = capsys.readouterr().out
+        assert "Failed reading config for broken" in out
+
+    @patch("agency_analytics.cli.CLIENTS_DIR")
+    @patch("agency_analytics.cli.subprocess.run")
     def test_cmd_pipeline_success(self, mock_run, mock_clients_dir, tmp_path):
         client_file = tmp_path / "acme.yml"
         client_file.write_text("active: true\nconnectors:\n  google:\n    enabled: true\n")
@@ -117,6 +139,7 @@ class TestCliSubcommands:
             client_secret="csec",
             env_path=".env",
             non_interactive=False,
+            no_browser=False,
         )
         ret = cli.cmd_auth_google(args)
         assert ret == 0
@@ -127,6 +150,29 @@ class TestCliSubcommands:
             client_secret="csec",
             env_path=".env",
             interactive=True,
+            no_browser=False,
+        )
+
+    @patch("agency_analytics.tiktok_auth.run_tiktok_auth_wizard")
+    def test_cmd_auth_tiktok_delegation(self, mock_wizard):
+        mock_wizard.return_value = 0
+        args = MagicMock(
+            client="bonilla",
+            client_key="ck",
+            client_secret="cs",
+            env_path=".env",
+            non_interactive=True,
+            no_browser=True,
+        )
+        ret = cli.cmd_auth_tiktok(args)
+        assert ret == 0
+        mock_wizard.assert_called_once_with(
+            client_name="bonilla",
+            client_key="ck",
+            client_secret="cs",
+            env_path=".env",
+            interactive=False,
+            no_browser=True,
         )
 
 
@@ -184,9 +230,35 @@ class TestCliParserDispatch:
     def test_cli_auth_google_dispatch(self, mock_cmd, monkeypatch):
         mock_cmd.return_value = 0
         monkeypatch.setattr(
-            sys, "argv", ["multitenant-elt", "auth", "google", "--services", "ga4,gtm"]
+            sys,
+            "argv",
+            ["multitenant-elt", "auth", "google", "--services", "ga4,gtm", "--no-browser"],
         )
         ret = cli.cli()
         assert ret == 0
         args = mock_cmd.call_args[0][0]
         assert args.services == "ga4,gtm"
+        assert args.no_browser is True
+
+    @patch("agency_analytics.cli.cmd_auth_tiktok")
+    def test_cli_auth_tiktok_dispatch(self, mock_cmd, monkeypatch):
+        mock_cmd.return_value = 0
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "multitenant-elt",
+                "auth",
+                "tiktok",
+                "--client",
+                "bonilla",
+                "--no-browser",
+                "--non-interactive",
+            ],
+        )
+        ret = cli.cli()
+        assert ret == 0
+        args = mock_cmd.call_args[0][0]
+        assert args.client == "bonilla"
+        assert args.no_browser is True
+        assert args.non_interactive is True
