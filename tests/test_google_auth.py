@@ -276,6 +276,7 @@ class TestScopeAndUrlBuilder:
             client_id="sample_client_id.apps.googleusercontent.com",
             scopes=["https://www.googleapis.com/auth/adwords"],
             redirect_uri="http://localhost:8085",
+            state="test_state_123",
         )
         assert "accounts.google.com/o/oauth2/v2/auth" in url
         assert "client_id=sample_client_id.apps.googleusercontent.com" in url
@@ -283,13 +284,16 @@ class TestScopeAndUrlBuilder:
         assert "response_type=code" in url
         assert "access_type=offline" in url
         assert "prompt=consent" in url
+        assert "state=test_state_123" in url
 
 
 class TestUpdateClientEnv:
     """Tests for safe writing of OAuth tokens to .env."""
 
     def test_update_client_env_global(self, tmp_path):
-        """Writes global credentials when client_name is None."""
+        """Writes global credentials when client_name is None and enforces 0600."""
+        import os
+
         env_file = tmp_path / ".env"
         env_file.write_text("POSTGRES_USER=test\n")
 
@@ -306,6 +310,8 @@ class TestUpdateClientEnv:
         assert "GOOGLE_OAUTH_CLIENT_SECRET=my_client_secret" in content
         assert "GOOGLE_OAUTH_REFRESH_TOKEN=my_refresh_token" in content
         assert "POSTGRES_USER=test" in content
+        if os.name == "posix":
+            assert (env_file.stat().st_mode & 0o777) == 0o600
 
     def test_update_client_env_specific(self, tmp_path):
         """Writes suffixed client credentials when client_name is provided."""
@@ -389,10 +395,33 @@ class TestOAuthRedirectHandler:
         assert handler.server.auth_error == "access_denied"
         handler.send_response.assert_called_with(400)
 
-    def test_handler_log_message_silent(self):
+    def test_handler_state_validation(self):
+        # 1. State matches
         handler = _OAuthRedirectHandler.__new__(_OAuthRedirectHandler)
-        # Should not raise
-        handler.log_message("format", "arg1")
+        handler.path = "/?code=sample_code&state=expected_secret_state"
+        handler.server = MagicMock()
+        handler.server.expected_state = "expected_secret_state"
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.wfile = MagicMock()
+
+        handler.do_GET()
+        assert handler.server.auth_code == "sample_code"
+        handler.send_response.assert_called_with(200)
+
+        # 2. State mismatch
+        handler_bad = _OAuthRedirectHandler.__new__(_OAuthRedirectHandler)
+        handler_bad.path = "/?code=sample_code&state=wrong_state"
+        handler_bad.server = MagicMock()
+        handler_bad.server.expected_state = "expected_secret_state"
+        handler_bad.send_response = MagicMock()
+        handler_bad.end_headers = MagicMock()
+        handler_bad.wfile = MagicMock()
+
+        handler_bad.do_GET()
+        assert handler_bad.server.auth_error == "state_mismatch"
+        handler_bad.send_response.assert_called_with(400)
 
 
 class TestRunGoogleAuthWizard:
@@ -580,3 +609,38 @@ class TestRunGoogleAuthWizard:
         )
         assert ret == 0
         mock_browser.assert_called_once()
+
+    @patch("agency_analytics.google_auth.update_client_env")
+    @patch("agency_analytics.google_auth.requests.post")
+    @patch("agency_analytics.google_auth.HTTPServer")
+    def test_wizard_interactive_use_existing_accepted(
+        self, mock_server_cls, mock_post, mock_update, monkeypatch, tmp_path
+    ):
+        mock_server = MagicMock()
+
+        def fake_handle():
+            mock_server.auth_code = "valid_code"
+            mock_server.auth_error = None
+
+        mock_server.handle_request.side_effect = fake_handle
+        mock_server_cls.return_value = mock_server
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"refresh_token": "rt_existing"}
+        mock_post.return_value = mock_resp
+
+        inputs = iter(["y"])
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+        monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "existing_id_123")
+        monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "existing_sec_123")
+        monkeypatch.setenv("GOOGLE_OAUTH_REFRESH_TOKEN", "existing_rt_123")
+        monkeypatch.setattr("getpass.getpass", lambda prompt="": "fallback_sec")
+
+        ret = run_google_auth_wizard(
+            client_name=None,
+            env_path=tmp_path / ".env",
+            interactive=True,
+            no_browser=True,
+        )
+        assert ret == 0

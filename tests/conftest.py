@@ -54,3 +54,13 @@ def mock_sleep():
     mock = patcher.start()
     yield mock
     patcher.stop()
+
+
+@pytest.fixture(autouse=True)
+def prevent_webbrowser_open(monkeypatch):
+    """Safety guard: ensure tests NEVER open a real browser window in any environment."""
+    import webbrowser
+
+    monkeypatch.setattr(webbrowser, "open", lambda *args, **kwargs: True)
+    monkeypatch.setattr(webbrowser, "open_new", lambda *args, **kwargs: True)
+    monkeypatch.setattr(webbrowser, "open_new_tab", lambda *args, **kwargs: True)

@@ -935,3 +935,52 @@ class TestAdditionalResources:
         assert len(captions) == 1
         assert captions[0]["caption_id"] == "cap1"
         assert captions[0]["language"] == "en"
+
+    @patch("run_youtube._api_get")
+    def test_get_uploaded_videos(self, mock_api_get):
+        from run_youtube import get_uploaded_videos
+
+        mock_api_get.return_value = {
+            "items": [
+                {
+                    "id": "pl_item_1",
+                    "snippet": {
+                        "playlistId": "upl_pl",
+                        "position": 0,
+                        "videoPublishedAt": "2024-01-01",
+                        "title": "Video 1",
+                        "description": "Desc 1",
+                        "thumbnails": {},
+                    },
+                    "contentDetails": {"videoId": "vid_1"},
+                }
+            ],
+            "nextPageToken": None,
+        }
+        rows = list(get_uploaded_videos("UC123", "upl_pl", "api_key"))
+        assert len(rows) == 1
+        assert rows[0]["video_id"] == "vid_1"
+        assert rows[0]["title"] == "Video 1"
+
+    @patch("run_youtube._analytics_query")
+    def test_get_video_analytics(self, mock_query):
+        from run_youtube import get_video_analytics
+
+        mock_query.return_value = [{"video": "v1", "views": 100}]
+        mock_tm = MagicMock()
+        rows = list(get_video_analytics("UC123", mock_tm, start_date="2024-01-01"))
+        assert len(rows) == 1
+        assert rows[0]["video"] == "v1"
+
+    @patch("run_youtube._date_windows")
+    @patch("run_youtube._analytics_query")
+    def test_dimension_analytics_resources(self, mock_query, mock_windows):
+        from run_youtube import get_traffic_source_analytics
+
+        mock_windows.return_value = [("2024-01-01", "2024-01-02")]
+        mock_query.return_value = [{"insightTrafficSourceType": "SUBSCRIBER", "views": 50}]
+        mock_tm = MagicMock()
+        res = get_traffic_source_analytics("UC123", mock_tm, start_date="2024-01-01")
+        rows = list(res())
+        assert len(rows) == 1
+        assert rows[0]["insightTrafficSourceType"] == "SUBSCRIBER"

@@ -113,6 +113,10 @@ Improvements planned for after the initial release and delivered in v2.0.0.
 - [x] Automatic OAuth token refresh (Meta, Google)
 - [x] Unified Google OAuth renewal wizard (`multitenant-elt auth google`) with `GoogleTokenManager`
 - [x] Meta Graph API token renewal wizard (`multitenant-elt auth meta`)
+- [x] TikTok Organic OAuth v2 renewal wizard (`multitenant-elt auth tiktok`) with RFC 7636 PKCE
+- [x] Centralized secrets store (`src/agency_analytics/secrets_store.py`) with chmod 0600 and secret masking
+- [x] Refresh Token Rotation (RTR) automated disk persistence for TikTok Organic
+- [x] Headless SSH terminal authentication support (`--no-browser`)
 - [x] Sunset Google Ads developer token across all models, schemas, and credentials
 
 ### More Connectors

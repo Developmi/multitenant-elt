@@ -151,6 +151,9 @@ auth-meta:      ## Run interactive Meta token renewal wizard (usage: make auth-m
 auth-google:    ## Run interactive Google OAuth renewal wizard (usage: make auth-google [CLIENT=acme] [SERVICES=all])
 	@uv run python main.py auth google $(if $(CLIENT),--client $(CLIENT),) $(if $(SERVICES),--services $(SERVICES),)
 
+auth-tiktok:    ## Run interactive TikTok OAuth renewal wizard (usage: make auth-tiktok [CLIENT=acme])
+	@uv run python main.py auth tiktok $(if $(CLIENT),--client $(CLIENT),)
+
 # === DOCKER - BUILD ========================================================
 
 docker-build:           ## Build all images (OCI labels: REVISION=local + CREATED now)

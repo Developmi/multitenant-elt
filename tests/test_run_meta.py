@@ -199,6 +199,43 @@ def test_meta_request_error_branches():
             with pytest.raises(Exception, match="exceeded on rate limit"):
                 _meta_request("http://meta.test", max_retries=1)
 
+    # HTTPError non-json body
+    mock_resp_non_json = MagicMock()
+    mock_resp_non_json.status_code = 502
+    mock_resp_non_json.json.side_effect = ValueError("Bad JSON")
+    err_non_json = dlt_requests.HTTPError(response=mock_resp_non_json)
+    with patch("run_meta.requests.get", side_effect=err_non_json):
+        with pytest.raises(Exception, match="API error:"):
+            _meta_request("http://meta.test", max_retries=1)
+
+    # HTTPError 429 retry
+    mock_resp_429 = MagicMock()
+    mock_resp_429.status_code = 429
+    mock_resp_429.json.return_value = {"error": {"code": 4, "message": "Rate limit"}}
+    err_429 = dlt_requests.HTTPError(response=mock_resp_429)
+    success_resp = MagicMock()
+    success_resp.json.return_value = {"data": []}
+    with patch("run_meta.requests.get", side_effect=[err_429, success_resp]):
+        with patch("time.sleep") as mock_sleep:
+            res = _meta_request("http://meta.test", max_retries=2)
+            assert res == {"data": []}
+            mock_sleep.assert_called_once()
+
+    # RequestException retry
+    req_err = dlt_requests.RequestException("Temporary drop")
+    with patch("run_meta.requests.get", side_effect=[req_err, success_resp]):
+        with patch("time.sleep") as mock_sleep:
+            res = _meta_request("http://meta.test", max_retries=2)
+            assert res == {"data": []}
+            mock_sleep.assert_called_once()
+
+    # _get_insight default fallback
+    from run_meta import _get_insight
+
+    assert _get_insight({}, "spend", default=0.0) == 0.0
+    assert _get_insight({"insights": {}}, "spend", default=10.0) == 10.0
+    assert _get_insight({"insights": {"data": [{"spend": None}]}}, "spend", default=5.0) == 5.0
+
     # HTTPError 190
     mock_resp_190 = MagicMock()
     mock_resp_190.status_code = 400

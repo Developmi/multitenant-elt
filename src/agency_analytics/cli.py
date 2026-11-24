@@ -148,6 +148,20 @@ def cmd_auth_google(args):
         client_secret=args.client_secret,
         env_path=args.env_path,
         interactive=not args.non_interactive,
+        no_browser=bool(getattr(args, "no_browser", False)),
+    )
+
+
+def cmd_auth_tiktok(args):
+    from agency_analytics.tiktok_auth import run_tiktok_auth_wizard
+
+    return run_tiktok_auth_wizard(
+        client_name=args.client,
+        client_key=args.client_key,
+        client_secret=args.client_secret,
+        env_path=args.env_path,
+        interactive=not args.non_interactive,
+        no_browser=bool(getattr(args, "no_browser", False)),
     )
 
 
@@ -225,7 +239,36 @@ def cli():
         action="store_true",
         help="Run without interactive prompts (fails if required flags are omitted)",
     )
+    p_google.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not open browser automatically (useful for remote servers / SSH)",
+    )
     p_google.set_defaults(func=cmd_auth_google)
+
+    p_tiktok = auth_subparsers.add_parser(
+        "tiktok",
+        help="Interactive TikTok OAuth 2.0 authorization wizard (Organic & Display APIs)",
+    )
+    p_tiktok.add_argument(
+        "--client",
+        default=None,
+        help="Target client ID for per-client keys, or omit for global agency credentials",
+    )
+    p_tiktok.add_argument("--client-key", default=None, help="TikTok App Client Key")
+    p_tiktok.add_argument("--client-secret", default=None, help="TikTok App Client Secret")
+    p_tiktok.add_argument("--env-path", default=".env", help="Path to .env file (default: .env)")
+    p_tiktok.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Run without interactive prompts (fails if required flags are omitted)",
+    )
+    p_tiktok.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not open browser automatically (useful for remote servers / SSH)",
+    )
+    p_tiktok.set_defaults(func=cmd_auth_tiktok)
 
     args = parser.parse_args()
     return args.func(args)

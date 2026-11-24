@@ -2,12 +2,14 @@ import argparse
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import dlt
 from dlt.sources.helpers import requests
 
-from agency_analytics import archiver, client_config
+import agency_analytics.archiver as archiver
+import agency_analytics.client_config as client_config
 
 TIKTOK_API_BASE = "https://open.tiktokapis.com"
 
@@ -172,6 +174,8 @@ def tiktok_organic_source(
     client_secret: str,
     refresh_token: str,
     capture: dict[str, list[dict[str, Any]]] | None = None,
+    refresh_token_env: str | None = None,
+    env_path: str | Path | None = ".env",
 ):
     state = dlt.current.source_state()
     tokens = state.setdefault("tiktok_organic_tokens", {})
@@ -186,7 +190,24 @@ def tiktok_organic_source(
         new_tokens = _refresh_access_token(client_key, client_secret, stored_rt)
         tokens["access_token"] = new_tokens["access_token"]
         tokens["expires_at"] = now + new_tokens["expires_in"]
-        state["tiktok_organic_refresh_token"] = new_tokens.get("refresh_token", stored_rt)
+        new_rt = new_tokens.get("refresh_token", stored_rt)
+        state["tiktok_organic_refresh_token"] = new_rt
+
+        # RTR: Persist newly rotated refresh token immediately to active env & .env
+        if refresh_token_env:
+            os.environ[refresh_token_env] = str(new_rt)
+            if env_path:
+                target_file = Path(env_path)
+                if target_file.exists():
+                    try:
+                        from agency_analytics.secrets_store import update_env_value
+
+                        update_env_value(target_file, refresh_token_env, str(new_rt))
+                    except Exception as exc:
+                        print(
+                            f"[TIKTOK_ORGANIC] Warning: Failed to persist rotated token to "
+                            f"{target_file}: {exc}"
+                        )
 
     access_token = tokens["access_token"]
 
@@ -217,6 +238,7 @@ def main():
     client_key = os.environ[connector["client_key_env"]]
     client_secret = os.environ[connector["client_secret_env"]]
     refresh_token = os.environ[connector["refresh_token_env"]]
+    refresh_token_env = connector.get("refresh_token_env")
 
     print(f"[TIKTOK_ORGANIC] Extracting data for client '{args.client}' (open_id {open_id})...")
 
@@ -229,7 +251,14 @@ def main():
     # extracts — zero extra API calls (ARC-R2/NFR-2).
     capture: dict[str, list[dict[str, Any]]] = {"profile_stats": []}
     info = pipeline.run(
-        tiktok_organic_source(open_id, client_key, client_secret, refresh_token, capture=capture)
+        tiktok_organic_source(
+            open_id,
+            client_key,
+            client_secret,
+            refresh_token,
+            capture=capture,
+            refresh_token_env=refresh_token_env,
+        )
     )
     print(f"[TIKTOK_ORGANIC] Done: {info}")
 

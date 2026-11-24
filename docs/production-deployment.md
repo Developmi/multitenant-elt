@@ -52,7 +52,7 @@ The container ships with an autonomous entrypoint (`/usr/local/bin/docker-entryp
 docker run --rm \
   --env-file .env \
   -v $(pwd)/clients:/app/clients:ro \
-  ghcr.io/developmi/multitenant-elt:v1.1.2 \
+  ghcr.io/developmi/multitenant-elt:v2.1.0 \
   pipeline --help
 ```
 
@@ -62,7 +62,7 @@ docker run --rm \
   --network agency_internal_net \
   --env-file .env \
   -v $(pwd)/clients:/app/clients:ro \
-  ghcr.io/developmi/multitenant-elt:v1.1.2 \
+  ghcr.io/developmi/multitenant-elt:v2.1.0 \
   connector facebook --client nike
 ```
 
@@ -71,7 +71,7 @@ docker run --rm \
 docker run --rm \
   --network agency_internal_net \
   --env-file .env \
-  ghcr.io/developmi/multitenant-elt:v1.1.2 \
+  ghcr.io/developmi/multitenant-elt:v2.1.0 \
   dbt build --select tag:nike
 ```
 
@@ -81,8 +81,8 @@ docker run --rm \
 
 New production releases are automated via GitHub Actions:
 1. Ensure all quality gates pass: `make quality`.
-2. Tag a new semantic version (e.g., `git tag v1.1.3`).
-3. Push the tag: `git push origin v1.1.3`.
+2. Tag a new semantic version (e.g., `git tag v2.1.0`).
+3. Push the tag: `git push origin v2.1.0`.
 4. The `.github/workflows/docker-build-scan-sign.yml` workflow automatically:
    - Builds `linux/amd64` and `linux/arm64` images.
    - Executes vulnerability gate with Trivy (`--severity CRITICAL,HIGH --exit-code 1`).
