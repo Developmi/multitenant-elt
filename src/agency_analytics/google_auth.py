@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import getpass
 import os
+import secrets
 import time
 import urllib.parse
 import webbrowser
@@ -15,8 +16,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
-import dotenv
 from dlt.sources.helpers import requests
+
+from agency_analytics.secrets_store import update_env_values
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -184,7 +186,12 @@ def get_scopes_for_services(services: list[str]) -> list[str]:
     return resolved
 
 
-def build_authorization_url(client_id: str, scopes: list[str], redirect_uri: str) -> str:
+def build_authorization_url(
+    client_id: str,
+    scopes: list[str],
+    redirect_uri: str,
+    state: str | None = None,
+) -> str:
     """Build Google OAuth 2.0 authorization URL with offline access and explicit consent."""
     params = {
         "client_id": client_id,
@@ -194,6 +201,8 @@ def build_authorization_url(client_id: str, scopes: list[str], redirect_uri: str
         "access_type": "offline",
         "prompt": "consent",
     }
+    if state:
+        params["state"] = state
     return f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}"
 
 
@@ -204,16 +213,15 @@ def update_client_env(
     client_secret: str,
     refresh_token: str,
 ) -> None:
-    """Save or update Google OAuth credentials in .env file cleanly."""
-    if not env_path.exists():
-        env_path.touch()
+    """Save or update Google OAuth credentials in .env file cleanly with 0600 permissions."""
     suffix = f"_{client_name.upper()}" if client_name else ""
-    dotenv.set_key(str(env_path), f"GOOGLE_OAUTH_CLIENT_ID{suffix}", client_id, quote_mode="never")
-    dotenv.set_key(
-        str(env_path), f"GOOGLE_OAUTH_CLIENT_SECRET{suffix}", client_secret, quote_mode="never"
-    )
-    dotenv.set_key(
-        str(env_path), f"GOOGLE_OAUTH_REFRESH_TOKEN{suffix}", refresh_token, quote_mode="never"
+    update_env_values(
+        env_path,
+        {
+            f"GOOGLE_OAUTH_CLIENT_ID{suffix}": client_id,
+            f"GOOGLE_OAUTH_CLIENT_SECRET{suffix}": client_secret,
+            f"GOOGLE_OAUTH_REFRESH_TOKEN{suffix}": refresh_token,
+        },
     )
 
 
@@ -230,6 +238,16 @@ class _OAuthRedirectHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"Authorization failed or was denied.")
             return
+
+        expected_state = getattr(self.server, "expected_state", None)
+        if isinstance(expected_state, str) and expected_state:
+            incoming_state = params.get("state", [None])[0]
+            if incoming_state != expected_state:
+                self.server.auth_error = "state_mismatch"  # type: ignore[attr-defined]
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(b"Authorization failed: CSRF state mismatch.")
+                return
 
         code = params.get("code", [None])[0]
         self.server.auth_code = code  # type: ignore[attr-defined]
@@ -297,18 +315,23 @@ def run_google_auth_wizard(
             return 1
         resolved_secret = getpass.getpass("Enter Google OAuth Client Secret: ").strip()
 
+    state = secrets.token_urlsafe(32)
     redirect_uri = f"http://localhost:{port}"
-    auth_url = build_authorization_url(resolved_id, scopes, redirect_uri)
+    auth_url = build_authorization_url(resolved_id, scopes, redirect_uri, state=state)
 
     # 2. Start loopback server and trigger consent flow
     server = HTTPServer(("localhost", port), _OAuthRedirectHandler)
     server.auth_code = None  # type: ignore[attr-defined]
     server.auth_error = None  # type: ignore[attr-defined]
+    server.expected_state = state  # type: ignore[attr-defined]
 
     print("\n==> [1/2] Opening browser for Google OAuth consent...")
     print(f"URL: {auth_url}\n")
     if not no_browser:
         webbrowser.open(auth_url)
+    else:
+        print("[INFO] Headless mode: Copy the URL above and open it in your browser.")
+        print(f"[TIP] If on a remote server/SSH: ssh -L {port}:localhost:{port} user@server\n")
 
     print(f"Waiting for authorization callback on {redirect_uri}...")
     server.handle_request()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -74,6 +75,23 @@ def test_debug_user_token_invalid(mock_debug_token_invalid):
         with pytest.raises(MetaAuthError) as exc_info:
             debug_user_token("expired_token")
         assert "The session has been invalidated" in str(exc_info.value)
+
+
+def test_debug_user_token_code_190_generic_hint():
+    with patch("requests.get") as mock_get:
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.json.return_value = {
+            "error": {
+                "message": "Session expired",
+                "code": 190,
+            }
+        }
+        mock_get.return_value = mock_response
+
+        with pytest.raises(MetaAuthError) as exc_info:
+            debug_user_token("expired_token")
+        assert "Generate a new token in Graph API Explorer" in str(exc_info.value)
 
 
 def test_exchange_long_lived_token_success():
@@ -364,7 +382,11 @@ def test_wizard_success_single_page(tmp_path, capsys):
                 assert ret == 0
                 out = capsys.readouterr().out
                 assert "SUCCESS: Generated Permanent Page Access Token" in out
+                assert "PAGE ACCESS TOKEN:\npage...ok_1" in out
+                assert "page_tok_1\n" not in out
                 assert "FACEBOOK_ACCESS_TOKEN_MYCLIENT=page_tok_1" in env_file.read_text()
+                if os.name == "posix":
+                    assert (env_file.stat().st_mode & 0o777) == 0o600
 
 
 def test_wizard_interactive_multiple_pages(monkeypatch, capsys):

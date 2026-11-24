@@ -13,8 +13,9 @@ import os
 import sys
 from pathlib import Path
 
-import dotenv
 import requests
+
+from agency_analytics.secrets_store import mask_secret, update_env_values
 
 GRAPH_API_BASE = "https://graph.facebook.com/v25.0"
 DEFAULT_TIMEOUT_SECONDS = 15
@@ -254,7 +255,8 @@ def list_page_accounts(
 def update_client_env(env_path: Path | str, client_id: str, page_token: str) -> bool:
     """Safely update FACEBOOK_ACCESS_TOKEN and INSTAGRAM_ACCESS_TOKEN in .env.
 
-    Preserves existing comments, whitespace, and unmodified keys.
+    Preserves existing comments, whitespace, and unmodified keys while enforcing
+    0600 file permissions.
 
     Args:
         env_path: Path to the target .env file.
@@ -264,12 +266,14 @@ def update_client_env(env_path: Path | str, client_id: str, page_token: str) -> 
     Returns:
         True if the file was updated successfully.
     """
-    path = Path(env_path)
-    if not path.exists():
-        path.touch()
     prefix = client_id.upper()
-    dotenv.set_key(str(path), f"FACEBOOK_ACCESS_TOKEN_{prefix}", page_token, quote_mode="never")
-    dotenv.set_key(str(path), f"INSTAGRAM_ACCESS_TOKEN_{prefix}", page_token, quote_mode="never")
+    update_env_values(
+        env_path,
+        {
+            f"FACEBOOK_ACCESS_TOKEN_{prefix}": page_token,
+            f"INSTAGRAM_ACCESS_TOKEN_{prefix}": page_token,
+        },
+    )
     return True
 
 
@@ -406,7 +410,8 @@ def run_meta_auth_wizard(
     if selected_page.instagram_username:
         print(f"Instagram: @{selected_page.instagram_username} (ID: {selected_page.instagram_id})")
     print("=" * 65)
-    print(f"\nPAGE ACCESS TOKEN:\n{selected_page.access_token}\n")
+    masked_token = mask_secret(selected_page.access_token)
+    print(f"\nPAGE ACCESS TOKEN:\n{masked_token}\n")
 
     # Update .env
     target_client = client_id
