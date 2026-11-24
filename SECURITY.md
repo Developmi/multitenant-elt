@@ -55,3 +55,5 @@ This project follows coordinated disclosure. We ask that you give us reasonable 
 4. **Pipeline tokens** live in environment variables, never in code
 5. **Docker networks** scope container traffic; Metabase attaches to the internal net to reach Postgres, so its security boundary is the restricted read-only DB role, not network isolation (see ARCHITECTURE.md → Honest Network Posture)
 6. **Telegram alerts** use a bot token with minimal permissions
+7. **Secrets File Permissions**: Automated OAuth token renewal wizards enforce POSIX `0600` permissions (`-rw-------`) via `secrets_store.py` to prevent unauthorized local reading
+8. **PKCE & CSRF Defense**: OAuth loopback redirect flows implement RFC 7636 PKCE (S256) and cryptographically random `state` token validation to block interception and injection attacks

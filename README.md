@@ -6,11 +6,11 @@
 
 *Eliminate manual reporting across 10 marketing platforms - one pipeline, one dashboard, zero spreadsheets.*
 
-[![Version](https://img.shields.io/badge/Version-v2.0.0-blue?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v2.1.0-blue?style=for-the-badge)](CHANGELOG.md)
 [![Python](https://img.shields.io/badge/Python_3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)](pyproject.toml)
 [![Docker](https://img.shields.io/badge/Docker_|_READY-2496ED?style=for-the-badge&logo=docker&logoColor=white)](Dockerfile)
 [![CI](https://img.shields.io/badge/CI-Passing-brightgreen?style=for-the-badge)](.github/workflows)
-[![Tests](https://img.shields.io/badge/Tests-504%20passed-success?style=for-the-badge)](tests)
+[![Tests](https://img.shields.io/badge/Tests-547%20passed%20(96%25)-success?style=for-the-badge)](tests)
 [![FinOps](https://img.shields.io/badge/FinOps-98%25%20OpEx%20Reduction%20(modeled%20estimate)-2ea44f?style=for-the-badge)](#-finops--cost-efficiency)
 [![Security](https://img.shields.io/badge/Security-Trivy%20%7C%20Cosign%20%7C%20SLSA-blue?style=for-the-badge)](SECURITY.md)
 [![Status](https://img.shields.io/badge/Status-Production_Active-brightgreen?style=for-the-badge)](#-features)
@@ -90,7 +90,7 @@ mindmap
 - **No-code connector config**: Add/remove platforms per client via YAML, no code changes
 - **Pipeline orchestration**: Native Python engine (`pipeline_runner.py`), dynamic client execution plans, database run step metrics, health checks, and Telegram alerts
 - **dbt transformations**: 30 staging models → intermediate → marts (35 models total)
-- **Quality gate**: 505 tests (504 passed, 1 skipped), ruff linting, mypy type checking, Trivy security scan
+- **Quality gate**: 548 tests (547 passed, 1 skipped), 96% coverage, ruff linting, mypy type checking, Trivy security scan
 - **Docker native**: Isolated services, two Docker networks, no vendor lock-in
 
 ---
@@ -125,7 +125,7 @@ mindmap
 | Meta Ads | Ads | ✅ Yes | ✅ Yes | v25.0, 250+ rows verified |
 | Facebook Page | Organic | ✅ Yes | ✅ Yes | v25.0, requires Page Access Token (not User Token) |
 | Instagram Business | Organic | ✅ Yes | ✅ Yes | v25.0, daily history marts and total_value metrics verified |
-| TikTok Organic | Organic | ✅ Yes | ✅ Yes | Profile stats, user info & refresh tokens verified live |
+| TikTok Organic | Organic | ✅ Yes | ✅ Yes | Profile stats, user info & RTR refresh tokens verified live |
 | YouTube | Organic | ✅ Yes | ✅ Yes | API v3, OAuth consent flow & daily video analytics verified live |
 | Google Ads | Ads | ✅ Yes | ✅ Yes | API v17/v18, OAuth 2.0 refresh flow verified live (2026-11-05) |
 | GA4 | Analytics | ✅ Yes | ✅ Yes | Data API v1beta, OAuth & service account reports verified live (2026-11-05) |
@@ -186,7 +186,7 @@ make docker-up-all     # Start Postgres, Pipeline, and Metabase (opt-in profile)
 
 ```bash
 make setup-env        # Ensure .env exists
-make test             # 504 tests should pass
+make test             # 547 tests should pass (96% coverage)
 
 # Run full Python E2E pipeline:
 make pipeline
@@ -245,7 +245,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full design.
 │   ├── pipeline.sh
 │   └── setup-networks.sh
 │
-├── tests/                          # 505 unit & integration tests (504 passed, 1 skipped)
+├── tests/                          # 548 unit & integration tests (547 passed, 1 skipped, 96% coverage)
 ├── .env.example
 ├── pyproject.toml
 └── .gitignore
@@ -317,10 +317,11 @@ See [.env.example](.env.example) for the full list of environment variables.
 | Category | Key variables |
 |---|---|
 | **Database** | `POSTGRES_PASSWORD`, `DESTINATION__POSTGRES__CREDENTIALS__*` |
-| **Meta Ads** | `META_ACCESS_TOKEN_{CLIENT}` |
+| **Meta Ads / Graph API** | `META_ACCESS_TOKEN_{CLIENT}`, `META_APP_ID`, `META_APP_SECRET` |
 | **Google Suite (Ads, GA4, GTM, YouTube)** | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN` (or per-client `_CLIENT`) |
 | **Facebook** | `FACEBOOK_ACCESS_TOKEN_{CLIENT}` |
 | **Instagram** | `INSTAGRAM_ACCESS_TOKEN_{CLIENT}` |
+| **TikTok Organic** | `TIKTOK_ORGANIC_CLIENT_KEY`, `TIKTOK_ORGANIC_CLIENT_SECRET`, `TIKTOK_ORGANIC_REFRESH_TOKEN` (or per-client `_CLIENT`) |
 | **Pipeline** | `CLIENTS_DIR`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 
 > **Security note:** Never commit `.env` files. Use `.env.example` as a template and keep credentials local.
@@ -330,7 +331,7 @@ See [.env.example](.env.example) for the full list of environment variables.
 ## 🧪 Tests & Quality Gate
 
 ```bash
-make test               # Run all tests (504 passed, 1 skipped)
+make test               # Run all tests (547 passed, 1 skipped, 96% coverage)
 make lint               # ruff check
 make typecheck          # mypy
 make test-security      # Trivy vulnerability & secret scan
@@ -358,6 +359,14 @@ make auth-google
 make auth-google CLIENT=acme
 # Or restrict to specific services (default: all):
 make auth-google SERVICES=ga4,gtm
+
+# Interactive TikTok OAuth Renewal Wizard (Organic v2 with PKCE & RTR)
+# Obtains 365-day refresh tokens with automatic Refresh Token Rotation (RTR) persistence
+make auth-tiktok
+# Or for a specific client:
+make auth-tiktok CLIENT=bonilla
+# Or run in a headless remote SSH session (manual copy/paste):
+uv run multitenant-elt auth tiktok --no-browser
 ```
 
 ---

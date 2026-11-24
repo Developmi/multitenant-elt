@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-11-24
+
+### Added
+
+- **TikTok Organic OAuth v2 Renewal Wizard**: Interactive CLI command (`multitenant-elt auth tiktok` and `make auth-tiktok`) supporting TikTok Organic API v2 with RFC 7636 PKCE (`code_challenge` / `code_verifier`), RFC 8252 loopback redirect server, CSRF `state` verification, and `--no-browser` headless support for remote SSH terminals.
+- **Centralized Secrets Store (`src/agency_analytics/secrets_store.py`)**: Unified secret updater enforcing POSIX `0600` file permissions (`enforce_file_permissions`), atomic file replacement, and NIST SP 800-63B / CWE-532 secret masking across stdout and logs.
+- **TikTok Refresh Token Rotation (RTR)**: Immediate disk persistence of rotated refresh tokens in `src/connectors/run_tiktok_organic.py` with `0600` permissions, complying with TikTok's mandatory RTR policy (effective Dec 1, 2026).
+- **Headless Test Suite Hardening**: Added global autouse fixture `prevent_webbrowser_open` in `tests/conftest.py` ensuring automated test runs in CI/CD and developer environments never open GUI browser windows.
+- **Test Suite Coverage Expansion**: Elevated total automated test suite to **548 tests (547 passed, 1 skipped)** with **96% global code coverage** across all modules and 100% coverage on `tiktok_auth.py`.
+
+### Security
+
+- **OAuth Wizard Hardening**: Migrated Meta (`meta_auth.py`) and Google (`google_auth.py`) wizards to `secrets_store.py`, ensuring all updated `.env` files are restricted to POSIX `0600` (`-rw-------`).
+- **CSRF State Validation**: Added cryptographic `state` parameter verification to Google and TikTok loopback redirect handlers, preventing authorization code injection attacks.
+
 ## [2.0.0] - 2026-11-05
 
 ### Breaking Changes

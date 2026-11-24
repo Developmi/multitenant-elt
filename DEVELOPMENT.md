@@ -167,14 +167,14 @@ make release-ready
 
 This runs sequentially:
 1. `make lint-all`: ruff check, ruff format check, mypy typecheck, actionlint, hadolint, zizmor
-2. `make test`: pytest suite (504+ passed tests with $\ge 85\%$ coverage)
+2. `make test`: pytest suite (547+ passed tests with $\ge 95\%$ coverage)
 3. `make test-security`: Trivy vulnerability scan against `uv.lock`
 
 All tests must be deterministic and mock-based. Live network requests during automated tests are strictly prohibited.
 
 ### Database Wipe Simulation Test (`WIPE_SIM=1`)
 
-The automated test suite runs 505 tests (504 passed unit & integration tests, 1 skipped by default). The single skipped test (`tests/test_wipe_sim.py::test_wipe_sim_end_to_end`) is an opt-in integration check that validates destructive database wipe and bootstrap simulation against a live containerized PostgreSQL instance. To run it locally:
+The automated test suite runs 548 tests (547 passed unit & integration tests, 1 skipped by default). The single skipped test (`tests/test_wipe_sim.py::test_wipe_sim_end_to_end`) is an opt-in integration check that validates destructive database wipe and bootstrap simulation against a live containerized PostgreSQL instance. To run it locally:
 
 ```bash
 WIPE_SIM=1 uv run pytest tests/test_wipe_sim.py -v

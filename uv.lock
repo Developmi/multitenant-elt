@@ -3,11 +3,11 @@ revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15' and platform_python_implementation != 'PyPy' and sys_platform != 'emscripten'",
-    "(python_full_version >= '3.15' and platform_python_implementation == 'PyPy') or (python_full_version >= '3.15' and sys_platform == 'emscripten')",
+    "python_full_version >= '3.15' and (platform_python_implementation == 'PyPy' or sys_platform == 'emscripten')",
     "python_full_version == '3.14.*' and platform_python_implementation != 'PyPy' and sys_platform != 'emscripten'",
-    "(python_full_version == '3.14.*' and platform_python_implementation == 'PyPy') or (python_full_version == '3.14.*' and sys_platform == 'emscripten')",
+    "python_full_version == '3.14.*' and (platform_python_implementation == 'PyPy' or sys_platform == 'emscripten')",
     "python_full_version < '3.14' and platform_python_implementation != 'PyPy' and sys_platform != 'emscripten'",
-    "(python_full_version < '3.14' and platform_python_implementation == 'PyPy') or (python_full_version < '3.14' and sys_platform == 'emscripten')",
+    "python_full_version < '3.14' and (platform_python_implementation == 'PyPy' or sys_platform == 'emscripten')",
 ]
 
 [[package]]
@@ -967,7 +967,7 @@ wheels = [
 
 [[package]]
 name = "multitenant-elt"
-version = "2.0.0"
+version = "2.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "dbt-postgres" },
