@@ -50,12 +50,15 @@ ARG SOURCE
 ARG REVISION
 ARG CREATED
 
-# ponytail: Temporary runtime apt patch to clear Debian CVE-2026-85091 (zlib1g) and CVE-2026-109518 on CI gate.
+# ponytail: Temporary runtime apt patch to clear Debian security CVEs on CI gate:
+# - CVE-2026-85091 (zlib1g)
+# - CVE-2026-109518 (apt / libapt-pkg7.0)
+# - CVE-2026-124851 (libzstd1)
 # Sub-optimal layer pattern: base OS CVEs belong in the base image, but upstream
 # Debian package releases require explicit runtime package installation until new image builds.
 # hadolint ignore=DL3008
 RUN apt-get update && \
-    apt-get install --no-install-recommends -y apt libapt-pkg7.0 zlib1g && \
+    apt-get install --no-install-recommends -y apt libapt-pkg7.0 zlib1g libzstd1 && \
     rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid 1000 app && \

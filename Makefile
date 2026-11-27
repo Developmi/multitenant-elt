@@ -10,7 +10,7 @@ SHELL := /bin/bash
 TOOLS := tools/bin
 
 .PHONY: help install lock lint format check typecheck test quality release-ready
-.PHONY: lint-docker lint-actions lint-all test-security
+.PHONY: lint-docker lint-actions lint-all test-security test-security-image
 .PHONY: tools reinstall doctor
 .PHONY: clean pristine
 .PHONY: setup-networks setup-env pipeline auth-meta auth-google
@@ -74,9 +74,14 @@ lint-all:      ## Run all linters (python, docker, actions, yaml)
 	$(MAKE) lint-docker
 	$(MAKE) lint-actions
 
-test-security: ## Run Trivy filesystem vulnerability scan
+test-security: ## Run Trivy vulnerability & Dockerfile misconfiguration scan
 	@test -x $(TOOLS)/trivy || $(MAKE) tools
-	$(TOOLS)/trivy fs --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed .
+	$(TOOLS)/trivy fs --scanners vuln,misconfig --severity CRITICAL,HIGH --ignore-unfixed .
+
+test-security-image: ## Build local image and run Trivy container image scan (OS + language CVEs)
+	@test -x $(TOOLS)/trivy || $(MAKE) tools
+	docker build -t multitenant-elt:security-scan .
+	$(TOOLS)/trivy image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed multitenant-elt:security-scan
 
 quality:       ## Full gate: lint-all -> test -> test-security
 	$(MAKE) lint-all
