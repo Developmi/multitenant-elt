@@ -1,0 +1,25 @@
+[Unit]
+Description=Multi-tenant ELT Pipeline Run (Ephemeral Container)
+Documentation=https://github.com/Developmi/multitenant-elt
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/agency
+ExecStart=/usr/bin/docker run --rm \
+  --name agency_pipeline_run \
+  --network agency_internal_net \
+  --env-file /opt/agency/.env \
+  -v /opt/agency/clients:/app/clients:ro \
+  ghcr.io/developmi/multitenant-elt:v2.1.0 \
+  pipeline
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=1800
+
+# Hardening & Sandboxing
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/agency

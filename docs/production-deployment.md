@@ -14,7 +14,25 @@ The production image is published to GitHub Container Registry (GHCR):
 
 ---
 
-## 2. Production Stack Operations (Using `./scripts/prod.sh`)
+## 2. Hardened Host Deployment (Clean Host, Zero Repo Clones)
+
+> [!IMPORTANT]
+> **Production OS Support:** This deployment model is officially validated and hardened for **Debian 12** and **Ubuntu 22.04 LTS** (aligned with the [Developmi Hardened](https://github.com/Developmi/hardened) L1 OS baseline). Any other distribution (Arch Linux, Fedora, Alpine host, etc.) is considered **experimental**.
+
+For bare-metal and VPS hosts adhering to strict security baselines (such as [Developmi Hardened](https://github.com/Developmi/hardened) with **NIST 800-53** and **CIS Level 1**), running a 24/7 background container for a nightly ELT job is an anti-pattern that wastes resources and complicates compliance.
+
+Instead, use the self-contained bundle in [`deploy/`](../deploy/README.md):
+1. **Persistent Database**: Only PostgreSQL 16 Alpine runs continuously via `deploy/compose.prod.yaml` (`docker compose -f compose.prod.yaml up -d`), self-initialized with `deploy/init.sql`.
+2. **Mode A (Manual & Ad-hoc Operations)**: Run on-demand pipelines, auth wizards (`auth tiktok`, `auth meta`), or dbt models with `deploy/run.sh` or `docker compose run --rm pipeline`.
+3. **Mode B (Automated Ephemeral Execution)**: A host `systemd.timer` wakes up once per night and executes an ephemeral container (`docker run --rm ... ghcr.io/developmi/multitenant-elt:v2.1.0 pipeline`), immediately freeing memory upon completion.
+4. **NIST AU-2 / AU-12 Logging**: Output streams natively to `journald` (`journalctl -u multitenant-elt.service`).
+5. **No Docker Socket Mounting**: Avoids running third-party schedulers (e.g. Ofelia) that require `/var/run/docker.sock`, preventing CIS Docker Benchmark 5.31 violations.
+
+See the complete guide, CLI wrapper, and systemd templates in [deploy/README.md](../deploy/README.md).
+
+---
+
+## 3. Production Stack Operations (Using `./scripts/prod.sh`)
 
 On target virtual machines or bare metal servers with Docker Engine 24+ and Docker Compose v2 installed, use `./scripts/prod.sh`:
 
@@ -43,7 +61,7 @@ On target virtual machines or bare metal servers with Docker Engine 24+ and Dock
 
 ---
 
-## 3. Standalone Container Execution (Kubernetes / AWS ECS / Nomad)
+## 4. Standalone Container Execution (Kubernetes / AWS ECS / Nomad)
 
 The container ships with an autonomous entrypoint (`/usr/local/bin/docker-entrypoint.sh`).
 
@@ -77,7 +95,7 @@ docker run --rm \
 
 ---
 
-## 4. Release & Tagging Process
+## 5. Release & Tagging Process
 
 New production releases are automated via GitHub Actions:
 1. Ensure all quality gates pass: `make quality`.
