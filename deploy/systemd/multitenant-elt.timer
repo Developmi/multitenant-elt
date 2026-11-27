@@ -1,0 +1,15 @@
+[Unit]
+Description=Nightly execution of Multi-tenant ELT Pipeline
+Documentation=https://github.com/Developmi/multitenant-elt
+Requires=multitenant-elt.service
+
+[Timer]
+# Run nightly at 03:00:00 local time
+OnCalendar=*-*-* 03:00:00
+# If the machine was offline at trigger time, run upon startup
+Persistent=true
+# 5-minute random jitter to avoid load spikes across multi-node fleets
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,90 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Production Compose Stack - Developmi / multitenant-elt
+# Dedicated for standalone host deployments (bare-metal, VPS, cloud VMs)
+# Hardened to CIS Docker Benchmark Level 1 & NIST 800-53 baseline
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agency_postgres
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+      - path: ../.env
+        required: false
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+          pids: 128
+        reservations:
+          memory: 256m
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-agency_admin} -d $${POSTGRES_DB:-agency_dw}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - agency_internal_net
+
+  # Ad-hoc / Manual execution service (gated by "manual" profile).
+  # NEVER started automatically on `docker compose up -d`.
+  # Invoked only on demand: `docker compose run --rm pipeline <command>`
+  pipeline:
+    profiles: ["manual"]
+    image: ghcr.io/developmi/multitenant-elt:v2.1.0
+    container_name: agency_pipeline_manual
+    restart: "no"
+    env_file:
+      - path: .env
+        required: false
+      - path: ../.env
+        required: false
+    environment:
+      CLIENTS_DIR: /app/clients
+      POSTGRES_HOST: agency_postgres
+      DESTINATION__POSTGRES__CREDENTIALS__HOST: agency_postgres
+    volumes:
+      - ${CLIENTS_VOLUME:-./clients}:/app/clients:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+          pids: 256
+    networks:
+      - agency_internal_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+
+networks:
+  agency_internal_net:
+    name: agency_internal_net
+    driver: bridge
